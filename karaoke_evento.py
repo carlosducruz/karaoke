@@ -266,7 +266,25 @@ class ModoEventoWindow:
             fg="#4CAF50",
             font=("Arial", 11)
         ).pack(anchor=tk.W)
-    
+
+        # Botão Excluir Participante
+        def excluir_participante():
+            if messagebox.askyesno("Excluir Participante", f"Tem certeza que deseja excluir o participante '{participante['nome']}' e todas as suas músicas?", parent=self.window):
+                self.db.remover_participante(participante['id'])
+                self.atualizar_lista_participantes()
+
+        excluir_btn = tk.Button(
+            card,
+            text="🗑 Excluir",
+            command=excluir_participante,
+            bg="#f44336",
+            fg="white",
+            font=("Arial", 9, "bold"),
+            cursor="hand2",
+            padx=10,
+            pady=4
+        )
+        excluir_btn.pack(side=tk.RIGHT, padx=8, pady=4)
     def adicionar_participante(self):
         """Dialog para adicionar novo participante"""
         dialog = tk.Toplevel(self.window)
@@ -462,7 +480,25 @@ class ModoEventoWindow:
             fg="#888888",
             font=("Arial", 9)
         ).pack(anchor=tk.W)
-    
+
+        # Botão Excluir
+        def excluir_musica():
+            if messagebox.askyesno("Excluir Música", "Tem certeza que deseja excluir esta música da playlist?", parent=self.window):
+                self.db.remover_musica_playlist(musica['id'])
+                self.atualizar_playlist()
+
+        excluir_btn = tk.Button(
+            item,
+            text="🗑 Excluir",
+            command=excluir_musica,
+            bg="#f44336",
+            fg="white",
+            font=("Arial", 9, "bold"),
+            cursor="hand2",
+            padx=10,
+            pady=4
+        )
+        excluir_btn.pack(side=tk.RIGHT, padx=8, pady=4)
     def criar_controles_evento(self):
         """Cria os botões de controle do evento"""
         ctrl_frame = tk.Frame(self.window, bg="#1a1a1a", pady=10)

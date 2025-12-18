@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox
+from tkinter import ttk
 from PIL import Image, ImageTk
 import vlc
 import threading
@@ -20,6 +21,63 @@ except ImportError:
     print("AVISO: Módulos de evento não encontrados. Modo Evento desabilitado.")
 
 class KaraokePlayer:
+    def abrir_busca_catalogo(self):
+        """Abre uma janela para buscar músicas/cantores/códigos no catálogo importado."""
+
+        busca_win = tk.Toplevel(self.root)
+        busca_win.title("Buscar no Catálogo")
+        busca_win.geometry("700x500")
+        busca_win.configure(bg="#222")
+
+        # Consulta quantidade de músicas no catálogo
+        try:
+            db = KaraokeDatabase()
+            total_musicas = len(db.buscar_catalogo())
+        except Exception:
+            total_musicas = 0
+
+        header_text = f"Buscar no Catálogo  (Músicas disponíveis: {total_musicas})"
+        tk.Label(busca_win, text=header_text, font=("Arial", 16, "bold"), bg="#222", fg="white").pack(pady=10)
+
+        search_frame = tk.Frame(busca_win, bg="#222")
+        search_frame.pack(pady=5)
+        tk.Label(search_frame, text="Termo:", bg="#222", fg="white", font=("Arial", 11)).pack(side=tk.LEFT)
+        termo_var = tk.StringVar()
+        termo_entry = tk.Entry(search_frame, textvariable=termo_var, font=("Arial", 12), width=30)
+        termo_entry.pack(side=tk.LEFT, padx=8)
+
+        result_frame = tk.Frame(busca_win, bg="#222")
+        result_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        columns = ("Cantor", "Código", "Música", "Início")
+        tree = ttk.Treeview(result_frame, columns=columns, show="headings", height=15)
+        for col in columns:
+            tree.heading(col, text=col)
+            tree.column(col, width=150 if col!="Música" else 250)
+        tree.pack(fill=tk.BOTH, expand=True)
+
+        scrollbar = tk.Scrollbar(result_frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        def buscar():
+            termo = termo_var.get().strip()
+            db = KaraokeDatabase()
+            try:
+                resultados = db.buscar_catalogo(termo) if termo else db.buscar_catalogo()
+            except Exception as e:
+                messagebox.showerror("Erro", f"Erro ao buscar catálogo:\n{e}")
+                return
+            tree.delete(*tree.get_children())
+            for row in resultados:
+                tree.insert("", tk.END, values=row)
+
+        tk.Button(search_frame, text="Buscar", command=buscar, bg="#2196F3", fg="white", font=("Arial", 10, "bold"), padx=10, pady=4).pack(side=tk.LEFT, padx=8)
+
+        # Busca inicial (todos)
+        buscar()
+
+        termo_entry.bind("<Return>", lambda e: buscar())
     def __init__(self, root):
         self.root = root
         self.root.title("Karaoke Player - MP4")
@@ -69,11 +127,11 @@ class KaraokePlayer:
         left_frame = tk.Frame(main_container, bg="#1a1a1a")
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        # Vídeo
-        video_frame = tk.Frame(left_frame, bg="#000000", width=616, height=400)
+        # Vídeo (menor)
+        video_frame = tk.Frame(left_frame, bg="#000000", width=480, height=270)
         video_frame.pack(padx=5, pady=5)
         video_frame.pack_propagate(False)
-        
+
         self.video_label = tk.Label(
             video_frame, 
             bg="#000000", 
@@ -104,93 +162,262 @@ class KaraokePlayer:
             font=("Arial", 8, "bold")
         )
         self.time_label.pack()
+
+        # Progresso (personalizado, sempre visível)
+        self.progress_frame = tk.Frame(left_frame, bg="#232323", bd=1, relief=tk.SUNKEN)
+        self.progress_frame.pack(fill=tk.X, padx=5, pady=(6, 10))
+
+        self.progress_label = tk.Label(
+            self.progress_frame,
+            text="",
+            bg="#232323",
+            fg="#00e676",
+            font=("Arial", 9, "bold")
+        )
+        self.progress_label.pack(pady=(2, 0))
+
+        self.progress_canvas = tk.Canvas(
+            self.progress_frame,
+            width=260,
+            height=18,
+            bg="#333",
+            highlightthickness=1,
+            highlightbackground="#444"
+        )
+        self.progress_canvas.pack(pady=(2, 6))
+        self.progress_bar = self.progress_canvas.create_rectangle(
+            0, 0, 0, 18, fill="#00e676", width=0
+        )
+        self.progress_animation_running = False
         
-        # Botão Modo Evento
+
+
+
+        # Frame agrupador estilizado para os botões principais
+        botoes_outer_frame = tk.Frame(left_frame, bg="#23233a", bd=3, relief=tk.RIDGE, highlightbackground="#2196F3", highlightcolor="#2196F3", highlightthickness=2)
+        botoes_outer_frame.pack(pady=12, fill=tk.X)
+
+        botoes_frame = tk.Frame(botoes_outer_frame, bg="#23233a")
+        botoes_frame.pack(padx=10, pady=10, fill=tk.X)
+
+        btn_width = 20
+        btn_height = 2
+        btn_padx = 8
+        btn_pady = 8
+
+        # Botões principais lado a lado, mesma altura
         if MODO_EVENTO_DISPONIVEL:
             tk.Button(
-                left_frame,
+                botoes_frame,
                 text="🎉 MODO EVENTO",
                 command=self.abrir_modo_evento,
                 bg="#9C27B0",
                 fg="white",
                 font=("Arial", 11, "bold"),
                 cursor="hand2",
-                padx=15,
-                pady=8
-            ).pack(pady=5)
-        
-        # Botão Carregar
+                width=btn_width,
+                height=btn_height
+            ).pack(side=tk.LEFT, padx=btn_padx, pady=btn_pady)
+
         tk.Button(
-            left_frame,
+            botoes_frame,
             text="📁 Carregar MP4",
             command=self.load_file,
             bg="#4CAF50",
             fg="white",
             font=("Arial", 10, "bold"),
             cursor="hand2",
-            padx=15,
-            pady=6
-        ).pack(pady=5)
-        
-        # Controle de tom
-        pitch_frame = tk.Frame(left_frame, bg="#1a1a1a")
-        pitch_frame.pack(pady=5)
-        
-        tk.Label(
-            pitch_frame, 
-            text="Tom:", 
-            bg="#1a1a1a", 
-            fg="white",
-            font=("Arial", 9, "bold")
-        ).pack(side=tk.LEFT, padx=5)
-        
+            width=btn_width,
+            height=btn_height
+        ).pack(side=tk.LEFT, padx=btn_padx, pady=btn_pady)
+
         tk.Button(
-            pitch_frame,
-            text="🔽 -1",
-            command=lambda: self.change_pitch(-1),
-            bg="#f44336",
+            botoes_frame,
+            text="📚 Importar Catálogo",
+            command=self.carregar_catalogo,
+            bg="#FF9800",
             fg="white",
-            font=("Arial", 8, "bold"),
-            width=5,
+            font=("Arial", 10, "bold"),
             cursor="hand2",
-            pady=3
-        ).pack(side=tk.LEFT, padx=2)
-        
-        self.pitch_label = tk.Label(
-            pitch_frame,
-            text="0",
-            bg="#1a1a1a",
-            fg="#4CAF50",
-            font=("Arial", 14, "bold"),
-            width=3
-        )
-        self.pitch_label.pack(side=tk.LEFT, padx=8)
-        
+            width=btn_width,
+            height=btn_height
+        ).pack(side=tk.LEFT, padx=btn_padx, pady=btn_pady)
+
         tk.Button(
-            pitch_frame,
-            text="🔼 +1",
-            command=lambda: self.change_pitch(1),
+            botoes_frame,
+            text="🔎 Consultar Catálogo",
+            command=self.abrir_busca_catalogo,
             bg="#2196F3",
             fg="white",
-            font=("Arial", 8, "bold"),
-            width=5,
+            font=("Arial", 10, "bold"),
             cursor="hand2",
-            pady=3
-        ).pack(side=tk.LEFT, padx=2)
-        
-        # Controles
-        player_frame = tk.Frame(left_frame, bg="#1a1a1a", pady=10)
-        player_frame.pack(pady=10)
-        
+            width=btn_width,
+            height=btn_height
+        ).pack(side=tk.LEFT, padx=btn_padx, pady=btn_pady)
+
+
+
+        # Frame horizontal para pitch e controles de reprodução
+        pitch_player_row = tk.Frame(left_frame, bg="#1a1a1a")
+        pitch_player_row.pack(pady=(8, 16), fill=tk.X)
+
+        # Altura e largura mínimas para controles de pitch e player
+        control_height = 120  # altura aumentada para caber todos os controles
+        pitch_width = int(410 * 0.8)   # 20% menor
+        player_width = int(410 * 1.2)  # 20% maior
+
+        # Pitch controls (à esquerda, personalizado)
+        pitch_frame = tk.Frame(
+            pitch_player_row,
+            bg="#181828",
+            bd=3,
+            relief=tk.RIDGE,
+            height=control_height,
+            width=pitch_width,
+            highlightbackground="#2196F3",
+            highlightcolor="#2196F3",
+            highlightthickness=2
+        )
+        pitch_frame.pack(side=tk.LEFT, padx=(0, 16), pady=2)
+        pitch_frame.pack_propagate(False)
+
+        # Espaçamento interno
+        pitch_inner = tk.Frame(pitch_frame, bg="#181828")
+        pitch_inner.pack(fill=tk.BOTH, expand=True, padx=12, pady=8)
+
+        # Título e dica
+        tk.Label(
+            pitch_inner,
+            text="Controle de Tom",
+            bg="#181828",
+            fg="#4CAF50",
+            font=("Arial", 12, "bold")
+        ).pack(anchor=tk.W)
+        tk.Label(
+            pitch_inner,
+            text="Ajuste o tom da música selecionada em semitons.",
+            bg="#181828",
+            fg="#BBB",
+            font=("Arial", 9, "italic")
+        ).pack(anchor=tk.W, pady=(0, 6))
+
+        pitch_ctrl_frame = tk.Frame(pitch_inner, bg="#181828")
+        pitch_ctrl_frame.pack(pady=2, fill=tk.X)
+
+        # Semitons label
+        tk.Label(
+            pitch_ctrl_frame,
+            text="Semitons:",
+            bg="#181828",
+            fg="white",
+            font=("Arial", 10, "bold")
+        ).pack(side=tk.LEFT, padx=(0, 6))
+
+        self.pitch_var = tk.IntVar(value=0)
+        pitch_spin = tk.Spinbox(
+            pitch_ctrl_frame,
+            from_=-12,
+            to=12,
+            textvariable=self.pitch_var,
+            width=4,
+            font=("Arial", 16, "bold"),
+            justify="center",
+            bg="#222",
+            fg="#4CAF50",
+            insertbackground="#4CAF50",
+            relief=tk.FLAT
+        )
+        pitch_spin.pack(side=tk.LEFT, padx=4)
+
+        # Valor do tom destacado
+        self.pitch_label = tk.Label(
+            pitch_ctrl_frame,
+            text="0",
+            bg="#222",
+            fg="#00e676",
+            font=("Arial", 18, "bold"),
+            width=4,
+            relief=tk.SUNKEN,
+            bd=2
+        )
+        self.pitch_label.pack(side=tk.LEFT, padx=8)
+
+        def aplicar_tom():
+            novo_tom = self.pitch_var.get()
+            if novo_tom != self.pitch_shift:
+                self.change_pitch(novo_tom - self.pitch_shift)
+
+        tk.Button(
+            pitch_ctrl_frame,
+            text=" OK ",
+            command=aplicar_tom,
+            bg="#2196F3",
+            fg="white",
+            font=("Arial", 11, "bold"),
+            width=7,
+            cursor="hand2",
+            pady=7,
+            relief=tk.RAISED,
+            activebackground="#1976D2"
+        ).pack(side=tk.LEFT, padx=8)
+
+        # Dica de uso
+        tk.Label(
+            pitch_inner,
+            text="Dica: Use valores negativos para abaixar e positivos para subir o tom.",
+            bg="#181828",
+            fg="#888",
+            font=("Arial", 8, "italic")
+        ).pack(anchor=tk.W, pady=(8, 0))
+
+
+        # Controles de reprodução (à direita do pitch, estilizado)
+        player_frame = tk.Frame(
+            pitch_player_row,
+            bg="#181828",
+            bd=3,
+            relief=tk.RIDGE,
+            height=control_height,
+            width=player_width,
+            highlightbackground="#2196F3",
+            highlightcolor="#2196F3",
+            highlightthickness=2
+        )
+        player_frame.pack(side=tk.LEFT, padx=(0, 16), pady=2)
+        player_frame.pack_propagate(False)
+
+        # Espaçamento interno
+        player_inner = tk.Frame(player_frame, bg="#181828")
+        player_inner.pack(fill=tk.BOTH, expand=True, padx=12, pady=8)
+
+        # Título e dica
+        tk.Label(
+            player_inner,
+            text="Controle da Reprodução",
+            bg="#181828",
+            fg="#4CAF50",
+            font=("Arial", 12, "bold")
+        ).pack(anchor=tk.W)
+        tk.Label(
+            player_inner,
+            text="O Botão próxima é apenas avançar para a próxima música na playlist.",
+            bg="#181828",
+            fg="#BBB",
+            font=("Arial", 9, "italic")
+        ).pack(anchor=tk.W, pady=(0, 6))
+
         btn_style = {
             "font": ("Arial", 11, "bold"),
             "cursor": "hand2",
             "width": 10,
-            "height": 2
+            "height": 2,
+            "bd": 2,
+            "relief": tk.RAISED,
+            "activebackground": "#1976D2"
         }
-        
+
         self.play_btn = tk.Button(
-            player_frame,
+            player_inner,
             text="▶ PLAY",
             command=self.play,
             bg="#4CAF50",
@@ -198,9 +425,9 @@ class KaraokePlayer:
             **btn_style
         )
         self.play_btn.pack(side=tk.LEFT, padx=5)
-        
+
         self.pause_btn = tk.Button(
-            player_frame,
+            player_inner,
             text="⏸ PAUSA",
             command=self.pause,
             bg="#FF9800",
@@ -208,45 +435,28 @@ class KaraokePlayer:
             **btn_style
         )
         self.pause_btn.pack(side=tk.LEFT, padx=5)
-        
+
         self.stop_btn = tk.Button(
-            player_frame,
-            text="⏹ STOP",
+            player_inner,
+            text="⏹ PARAR",
             command=self.stop,
             bg="#f44336",
             fg="white",
             **btn_style
         )
         self.stop_btn.pack(side=tk.LEFT, padx=5)
-        
-        # Botões de controle da playlist
-        playlist_controls = tk.Frame(left_frame, bg="#1a1a1a")
-        playlist_controls.pack(pady=5)
-        
-        btn_style_playlist = {
-            "font": ("Arial", 9, "bold"),
-            "cursor": "hand2",
-            "padx": 10,
-            "pady": 5
-        }
-        
+
+        # Botão Próxima
+        btn_proxima_style = btn_style.copy()
+        btn_proxima_style["width"] = 13  # aumentar largura para caber "PRÓXIMA"
         tk.Button(
-            playlist_controls,
-            text="▶ Tocar Selecionada",
-            command=self.tocar_musica_selecionada,
-            bg="#2196F3",
-            fg="white",
-            **btn_style_playlist
-        ).pack(side=tk.LEFT, padx=2)
-        
-        tk.Button(
-            playlist_controls,
-            text="⏭ Próxima",
+            player_inner,
+            text="⏭ PRÓXIMA",
             command=self.tocar_proxima_musica,
             bg="#673AB7",
             fg="white",
-            **btn_style_playlist
-        ).pack(side=tk.LEFT, padx=2)
+            **btn_proxima_style
+        ).pack(side=tk.LEFT, padx=5)
         
         # Status
         status_frame = tk.Frame(left_frame, bg="#1a1a1a")
@@ -261,29 +471,7 @@ class KaraokePlayer:
         )
         self.status_label.pack()
         
-        # Progresso
-        self.progress_frame = tk.Frame(status_frame, bg="#1a1a1a")
-        self.progress_label = tk.Label(
-            self.progress_frame,
-            text="Processando...",
-            bg="#1a1a1a",
-            fg="#4CAF50",
-            font=("Arial", 7)
-        )
-        self.progress_label.pack()
-        
-        self.progress_canvas = tk.Canvas(
-            self.progress_frame,
-            width=250,
-            height=15,
-            bg="#2d2d2d",
-            highlightthickness=0
-        )
-        self.progress_canvas.pack(pady=3)
-        self.progress_bar = self.progress_canvas.create_rectangle(
-            0, 0, 0, 15, fill="#4CAF50", width=0
-        )
-        self.progress_animation_running = False
+        # ...progresso agora está abaixo do info_frame...
         
         # COLUNA DIREITA (30%) - Playlist
         right_frame = tk.Frame(main_container, bg="#2d2d2d", width=350)
@@ -532,12 +720,20 @@ class KaraokePlayer:
         if not self.playlist_items:
             messagebox.showinfo("Playlist", "Playlist vazia.")
             return
-        
-        if self.selected_playlist_index is None:
-            next_index = 0
-        else:
-            next_index = (self.selected_playlist_index + 1) % len(self.playlist_items)
-        
+
+        # Descobre o índice da música atualmente tocando
+        idx = self.selected_playlist_index
+        if idx is None:
+            # Tenta encontrar a música tocando pelo modo evento
+            if self.modo_evento_ativo and self.musica_atual_evento:
+                for i, item in enumerate(self.playlist_items):
+                    if item.get('id') == self.musica_atual_evento.get('id'):
+                        idx = i
+                        break
+            else:
+                idx = -1
+
+        next_index = (idx + 1) % len(self.playlist_items)
         self.tocar_musica_playlist(next_index)
     
     def carregar_playlist_evento(self, evento_id):
@@ -663,13 +859,16 @@ class KaraokePlayer:
     
     def show_progress(self, msg="Processando..."):
         self.progress_label.config(text=msg)
-        self.progress_frame.pack()
+        self.progress_label.pack_configure()
+        self.progress_canvas.itemconfig(self.progress_bar, fill="#00e676")
+        self.progress_frame.lift()
         self.progress_animation_running = True
         self.animate_progress()
     
     def hide_progress(self):
         self.progress_animation_running = False
-        self.progress_frame.pack_forget()
+        self.progress_label.config(text="")
+        self.progress_canvas.coords(self.progress_bar, 0, 0, 0, 18)
     
     def animate_progress(self):
         if not self.progress_animation_running:
@@ -697,8 +896,11 @@ class KaraokePlayer:
         self.root.config(cursor="wait")
         self.show_progress("Processando tom...")
         self.pitch_shift += steps
+        # Atualiza o valor do Spinbox e label
+        if hasattr(self, 'pitch_var'):
+            self.pitch_var.set(self.pitch_shift)
         self.pitch_label.config(text=f"{self.pitch_shift:+d}" if self.pitch_shift != 0 else "0")
-        
+
         if self.pitch_shift != 0:
             self.process_audio_with_pitch()
         else:
@@ -828,7 +1030,8 @@ class KaraokePlayer:
     def display_frame(self, img):
         try:
             w, h = img.size
-            scale = min(616/w, 400/h)
+            # Ajustar para o novo tamanho do video_frame (480x270)
+            scale = min(480/w, 270/h)
             nw = int(w * scale)
             nh = int(h * scale)
             img = img.resize((nw, nh), Image.Resampling.LANCZOS)
@@ -842,6 +1045,32 @@ class KaraokePlayer:
         if self.is_playing:
             self.player.pause()
             self.is_playing = False
+
+    def carregar_catalogo(self):
+        """Limpa o catálogo e importa o PDF selecionado para o banco de dados."""
+        try:
+            from tkinter import filedialog, messagebox
+            pdf_path = filedialog.askopenfilename(
+                title="Selecione o arquivo PDF do catálogo",
+                filetypes=[("PDF", "*.pdf"), ("Todos os arquivos", "*.*")]
+            )
+            if not pdf_path:
+                return
+            db = KaraokeDatabase()
+            if messagebox.askyesno("Limpar Catálogo", "Deseja limpar o catálogo antes de importar? (Isso removerá todas as músicas do catálogo atual)"):
+                db.limpar_catalogo()
+            self.show_progress("Importando catálogo...")
+            self.root.update()
+            num = db.importar_catalogo_pdf(pdf_path)
+            self.hide_progress()
+            messagebox.showinfo("Catálogo", f"Catálogo importado com sucesso! {num} músicas adicionadas.")
+        except ImportError:
+            messagebox.showerror("Erro", "PyPDF2 não está instalado. Instale com: pip install PyPDF2")
+        except FileNotFoundError as e:
+            messagebox.showerror("Erro", str(e))
+        except Exception as e:
+            self.hide_progress()
+            messagebox.showerror("Erro", f"Erro ao importar catálogo:\n{e}")
     
     def stop(self):
         self.player.stop()

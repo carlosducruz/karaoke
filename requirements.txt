@@ -1,3 +1,4 @@
 Pillow
 python-vlc
 imageio-ffmpeg
+PyPDF2

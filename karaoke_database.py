@@ -2,10 +2,103 @@ import sqlite3
 import json
 from datetime import datetime
 
+
 class KaraokeDatabase:
+    def limpar_catalogo(self):
+        """Remove todos os registros do catálogo de músicas."""
+        self.criar_tabela_catalogo()
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM catalogo")
+        conn.commit()
+        conn.close()
+    def criar_tabela_catalogo(self):
+        """Cria a tabela do catálogo se não existir"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS catalogo (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cantor TEXT,
+                cod TEXT,
+                musica TEXT,
+                inicio TEXT
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+    def importar_catalogo_pdf(self, pdf_path):
+        """Importa o catálogo do PDF para o banco de dados. Retorna número de músicas importadas."""
+        import os
+        try:
+            from PyPDF2 import PdfReader
+        except ImportError:
+            raise ImportError("PyPDF2 não instalado. Instale com: pip install PyPDF2")
+        if not os.path.exists(pdf_path):
+            raise FileNotFoundError(f"Arquivo não encontrado: {pdf_path}")
+        self.criar_tabela_catalogo()
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        reader = PdfReader(pdf_path)
+        linhas = []
+        for page in reader.pages:
+            text = page.extract_text()
+            if text:
+                for linha in text.splitlines():
+                    partes = [p.strip() for p in linha.split('|')]
+                    if len(partes) == 4:
+                        linhas.append(partes)
+        # Logging: print detalhado para cada linha importada
+        for idx, (cantor, cod, musica, inicio) in enumerate(linhas, 1):
+            cursor.execute("INSERT INTO catalogo (cantor, cod, musica, inicio) VALUES (?, ?, ?, ?)", (cantor, cod, musica, inicio))
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            print(f"[{now}] Incluindo catálogo {idx}: cantor='{cantor}', cod='{cod}', musica='{musica}', inicio='{inicio}'")
+        conn.commit()
+        conn.close()
+        return len(linhas)
+
+    def buscar_catalogo(self, termo=None, limite=None):
+        """Busca músicas/cantores/códigos no catálogo. Retorna lista de tuplas."""
+        self.criar_tabela_catalogo()
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        if termo:
+            cursor.execute("""
+                SELECT cantor, cod, musica, inicio FROM catalogo
+                WHERE cantor LIKE ? OR cod LIKE ? OR musica LIKE ?
+                ORDER BY cantor, musica
+            """, (f"%{termo}%", f"%{termo}%", f"%{termo}%"))
+        else:
+            if limite:
+                cursor.execute("SELECT cantor, cod, musica, inicio FROM catalogo ORDER BY cantor, musica LIMIT ?", (limite,))
+            else:
+                cursor.execute("SELECT cantor, cod, musica, inicio FROM catalogo ORDER BY cantor, musica")
+        rows = cursor.fetchall()
+        conn.close()
+        return rows
     def __init__(self, db_path="karaoke_eventos.db"):
         self.db_path = db_path
         self.init_database()
+
+    def remover_participante(self, participante_id):
+        """Remove um participante e todas as suas músicas da playlist"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        # Remove músicas da playlist desse participante
+        cursor.execute("DELETE FROM playlist WHERE participante_id = ?", (participante_id,))
+        # Remove o participante
+        cursor.execute("DELETE FROM participantes WHERE id = ?", (participante_id,))
+        conn.commit()
+        conn.close()
+
+    def remover_musica_playlist(self, musica_id):
+        """Remove uma música da playlist pelo ID"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM playlist WHERE id = ?", (musica_id,))
+        conn.commit()
+        conn.close()
     
     def init_database(self):
         """Inicializa o banco de dados com as tabelas necessárias"""

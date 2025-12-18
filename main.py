@@ -1055,20 +1055,27 @@ class KaraokePlayer:
                 filetypes=[("PDF", "*.pdf"), ("Todos os arquivos", "*.*")]
             )
             if not pdf_path:
+                self.debug_log("[CATALOGO] Nenhum arquivo PDF selecionado.")
                 return
+            self.debug_log(f"[CATALOGO] PDF selecionado: {pdf_path}")
             db = KaraokeDatabase()
             if messagebox.askyesno("Limpar Catálogo", "Deseja limpar o catálogo antes de importar? (Isso removerá todas as músicas do catálogo atual)"):
+                self.debug_log("[CATALOGO] Limpando catálogo antes de importar.")
                 db.limpar_catalogo()
             self.show_progress("Importando catálogo...")
             self.root.update()
             num = db.importar_catalogo_pdf(pdf_path)
             self.hide_progress()
+            self.debug_log(f"[CATALOGO] Importação concluída. {num} músicas importadas.")
             messagebox.showinfo("Catálogo", f"Catálogo importado com sucesso! {num} músicas adicionadas.")
         except ImportError:
+            self.debug_log("[CATALOGO] ERRO: PyPDF2 não está instalado.")
             messagebox.showerror("Erro", "PyPDF2 não está instalado. Instale com: pip install PyPDF2")
         except FileNotFoundError as e:
+            self.debug_log(f"[CATALOGO] ERRO: {e}")
             messagebox.showerror("Erro", str(e))
         except Exception as e:
+            self.debug_log(f"[CATALOGO] ERRO: {e}")
             self.hide_progress()
             messagebox.showerror("Erro", f"Erro ao importar catálogo:\n{e}")
     

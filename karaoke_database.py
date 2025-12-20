@@ -482,7 +482,7 @@ class KaraokeDatabase:
         return 0
     
     def obter_ranking(self, evento_id):
-        """Obtém o ranking final dos participantes"""
+        """Obtém o ranking final dos participantes com avatar"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
@@ -496,9 +496,9 @@ class KaraokeDatabase:
         ranking = []
         for i, row in enumerate(cursor.fetchall(), 1):
             ranking.append({
-                'posicao': i,
+                'posicao': i,  # Adicionamos a posição aqui
                 'nome': row[0],
-                'avatar_path': row[1],
+                'avatar_path': row[1],  # Já está incluído!
                 'pontuacao': row[2]
             })
         
@@ -515,4 +515,25 @@ class KaraokeDatabase:
         cursor.execute("DELETE FROM eventos WHERE id = ?", (evento_id,))
         
         conn.commit()
+        conn.close()
+
+    # Adicione este método na classe KaraokeDatabase em karaoke_database.py
+
+    def adicionar_coluna_musica_nome(self):
+        """Adiciona a coluna musica_nome na tabela playlist se não existir"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Verifica se a coluna já existe
+        cursor.execute("PRAGMA table_info(playlist)")
+        columns = [column[1] for column in cursor.fetchall()]
+        
+        if 'musica_nome' not in columns:
+            cursor.execute("""
+                ALTER TABLE playlist
+                ADD COLUMN musica_nome TEXT
+            """)
+            conn.commit()
+            print("✅ Coluna 'musica_nome' adicionada à tabela playlist")
+        
         conn.close()

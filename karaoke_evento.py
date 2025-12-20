@@ -673,10 +673,26 @@ class ModoEventoWindow:
         mid_frame = tk.Frame(dialog, bg="#1a1a1a")
         mid_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
+        # CONFIGURAR ESTILO PARA O TREEVIEW
+        style = ttk.Style()
+        style.theme_use('default')
+        
+        # Configurar estilo para o Treeview
+        style.configure("Treeview",
+                        background="white",  # Fundo branco
+                        foreground="black",  # Texto preto
+                        fieldbackground="white",  # Fundo das colunas
+                        font=('Arial', 10))  # Fonte
+        
+        style.map('Treeview',
+                background=[('selected', '#4CAF50')],  # Fundo quando selecionado
+                foreground=[('selected', 'white')])     # Texto quando selecionado
+        
         # Treeview com configurações especiais
         columns = ("Código", "Cantor", "Música", "Início")
-        tree = ttk.Treeview(mid_frame, columns=columns, show="headings", height=8)
+        tree = ttk.Treeview(mid_frame, columns=columns, show="headings", height=8, style="Treeview")
         
+        # Configurar colunas
         for col in columns:
             tree.heading(col, text=col)
             if col == "Código":
@@ -686,8 +702,13 @@ class ModoEventoWindow:
             else:
                 tree.column(col, width=120)
         
-        # Configurar tags para seleção
-        tree.tag_configure('item', foreground='white')
+        # Configurar cores do cabeçalho (opcional)
+        style.configure("Treeview.Heading",
+                        background="#2d2d2d",  # Fundo escuro
+                        foreground="white",     # Texto branco
+                        font=('Arial', 10, 'bold'))
+        
+        # Configurar tags para seleção (remova as configurações antigas se existirem)
         tree.tag_configure('selected', background='#4CAF50', foreground='white')
         
         tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)

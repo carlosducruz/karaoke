@@ -191,7 +191,7 @@ class KaraokePlayer:
             for row in resultados:
                 tree.insert("", tk.END, values=row)
 
-        # Função quando clica em uma linha
+            # Função quando clica em uma linha
         def on_double_click(event):
             selection = tree.selection()
             if not selection:
@@ -200,6 +200,8 @@ class KaraokePlayer:
             item = tree.item(selection[0])
             valores = item['values']
             codigo = str(valores[1])  # Código está na segunda coluna
+            cantor = valores[0]
+            musica = valores[2]
             
             # Buscar arquivo MP4
             arquivo_encontrado = self.buscar_arquivo_mp4(codigo)
@@ -207,7 +209,7 @@ class KaraokePlayer:
             if arquivo_encontrado:
                 resposta = messagebox.askyesno(
                     "Música Encontrada",
-                    f"🎤 Cantor: {valores[0]}\n🎵 Música: {valores[2]}\n🔢 Código: {codigo}\n\n"
+                    f"🎤 Cantor: {cantor}\n🎵 Música: {musica}\n🔢 Código: {codigo}\n\n"
                     f"📁 Arquivo: {os.path.basename(arquivo_encontrado)}\n\n"
                     "Deseja carregar esta música?"
                 )
@@ -218,27 +220,27 @@ class KaraokePlayer:
                     self.processed_file = arquivo_encontrado
                     self.pitch_shift = 0
                     self.pitch_label.config(text="0")
-                    self.file_label.config(text=f"{valores[1]} - {valores[2]}")
+                    self.file_label.config(text=f"{codigo} - {musica}")
                     self.show_first_frame()
-                    self.status_label.config(text=f"✓ Música carregada: {valores[2]}")
+                    self.status_label.config(text=f"✅ Música carregada: {musica}")
                     busca_win.destroy()
                     
-                    # Adiciona à playlist do modo normal
+                    # Adiciona à playlist do modo normal COM NOME DA MÚSICA
                     if not self.modo_evento_ativo:
                         self.playlist_items.append({
                             'arquivo_path': arquivo_encontrado,
-                            'participante_nome': valores[1],
+                            'participante_nome': cantor,  # Nome do cantor
+                            'musica_nome': musica,  # NOME DA MÚSICA
                             'tom_ajuste': 0,
                             'ja_tocou': False,
-                            'ordem': len(self.playlist_items) + 1,
-                            'musica_nome': valores[2]
+                            'ordem': len(self.playlist_items) + 1
                         })
                         self.atualizar_playlist_visual()
             else:
                 messagebox.showerror(
                     "Arquivo não encontrado",
                     f"Não foi possível encontrar o arquivo para o código: {codigo}\n\n"
-                    f"Procurando por: '{codigo}.mp4' em D:\\musicas"
+                    f"Procurando por: '{codigo}.mp4' em D:\\TeraBoxDownload"
                 )
 
         # Botão para carregar música selecionada
@@ -757,22 +759,24 @@ class KaraokePlayer:
             self.criar_item_playlist(i, item)
     
     def criar_item_playlist(self, index, item):
+        """Cria um card visual para um item da playlist com avatar, nome do participante e música"""
         is_selected = (index == self.selected_playlist_index)
         is_playing = (self.modo_evento_ativo and 
-                     self.musica_atual_evento and 
-                     item['id'] == self.musica_atual_evento['id'])
+                    self.musica_atual_evento and 
+                    item.get('id') == self.musica_atual_evento.get('id'))
         
         if is_playing:
             bg = "#1a5a1a"
         elif is_selected:
             bg = "#3a3a5a"
-        elif item['ja_tocou']:
+        elif item.get('ja_tocou'):
             bg = "#2a2a2a"
         else:
             bg = "#1a1a1a"
         
-        frame = tk.Frame(self.playlist_inner_frame, bg=bg, relief=tk.RAISED, bd=1, cursor="hand2")
-        frame.pack(fill=tk.X, pady=1, padx=2)
+        # Frame principal do card
+        frame = tk.Frame(self.playlist_inner_frame, bg=bg, relief=tk.RAISED, bd=2, cursor="hand2")
+        frame.pack(fill=tk.X, pady=2, padx=3)
         
         def selecionar_e_tocar(event):
             self.selected_playlist_index = index
@@ -781,46 +785,150 @@ class KaraokePlayer:
         
         frame.bind("<Button-1>", selecionar_e_tocar)
         
-        # Número
-        num = tk.Label(frame, text=f"#{item['ordem']}", bg=bg, fg="#888" if item['ja_tocou'] else "white", font=("Arial", 8, "bold"), width=3)
-        num.pack(side=tk.LEFT, padx=3, pady=3)
-        num.bind("<Button-1>", selecionar_e_tocar)
+        # Container horizontal principal
+        main_container = tk.Frame(frame, bg=bg)
+        main_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        main_container.bind("<Button-1>", selecionar_e_tocar)
         
-        # Status
+        # COLUNA ESQUERDA: Número, Status e Avatar
+        left_col = tk.Frame(main_container, bg=bg)
+        left_col.pack(side=tk.LEFT, padx=(0, 8))
+        left_col.bind("<Button-1>", selecionar_e_tocar)
+        
+        # Número da ordem
+        num_label = tk.Label(
+            left_col, 
+            text=f"#{item.get('ordem', index+1)}", 
+            bg=bg, 
+            fg="#888" if item.get('ja_tocou') else "#FFA500", 
+            font=("Arial", 10, "bold"),
+            width=3
+        )
+        num_label.pack(pady=(0, 2))
+        num_label.bind("<Button-1>", selecionar_e_tocar)
+        
+        # Status indicator
         if is_playing:
             status = "▶"
-            cor = "#4CAF50"
-        elif item['ja_tocou']:
+            cor_status = "#4CAF50"
+        elif item.get('ja_tocou'):
             status = "✓"
-            cor = "#666"
+            cor_status = "#666"
         else:
             status = "○"
-            cor = "#FFA500"
+            cor_status = "#FFA500"
         
-        st = tk.Label(frame, text=status, bg=bg, fg=cor, font=("Arial", 10, "bold"), width=2)
-        st.pack(side=tk.LEFT, padx=2)
-        st.bind("<Button-1>", selecionar_e_tocar)
+        status_label = tk.Label(
+            left_col, 
+            text=status, 
+            bg=bg, 
+            fg=cor_status, 
+            font=("Arial", 14, "bold")
+        )
+        status_label.pack(pady=(0, 5))
+        status_label.bind("<Button-1>", selecionar_e_tocar)
         
-        # Info
-        info = tk.Frame(frame, bg=bg)
-        info.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=3)
-        info.bind("<Button-1>", selecionar_e_tocar)
+        # Avatar
+        avatar_frame = tk.Frame(left_col, bg=bg, width=50, height=50, relief=tk.SUNKEN, bd=1)
+        avatar_frame.pack()
+        avatar_frame.pack_propagate(False)
+        avatar_frame.bind("<Button-1>", selecionar_e_tocar)
         
-        nome = os.path.basename(item['arquivo_path'])
-        if len(nome) > 25:
-            nome = nome[:22] + "..."
+        try:
+            if item.get('participante_avatar') and os.path.exists(item['participante_avatar']):
+                from PIL import Image, ImageTk
+                img = Image.open(item['participante_avatar'])
+                img = img.resize((48, 48), Image.Resampling.LANCZOS)
+                photo = ImageTk.PhotoImage(img)
+                
+                avatar_label = tk.Label(avatar_frame, image=photo, bg=bg)
+                avatar_label.image = photo  # Mantém referência
+                avatar_label.pack(expand=True)
+                avatar_label.bind("<Button-1>", selecionar_e_tocar)
+            else:
+                # Avatar padrão com inicial do nome
+                inicial = item.get('participante_nome', '?')[0].upper()
+                avatar_label = tk.Label(
+                    avatar_frame,
+                    text=inicial,
+                    bg="#555",
+                    fg="white",
+                    font=("Arial", 20, "bold")
+                )
+                avatar_label.pack(expand=True, fill=tk.BOTH)
+                avatar_label.bind("<Button-1>", selecionar_e_tocar)
+        except Exception as e:
+            # Fallback para avatar padrão
+            inicial = item.get('participante_nome', '?')[0].upper()
+            avatar_label = tk.Label(
+                avatar_frame,
+                text=inicial,
+                bg="#555",
+                fg="white",
+                font=("Arial", 20, "bold")
+            )
+            avatar_label.pack(expand=True, fill=tk.BOTH)
+            avatar_label.bind("<Button-1>", selecionar_e_tocar)
         
-        arq = tk.Label(info, text=nome, bg=bg, fg="white" if not item['ja_tocou'] else "#888", font=("Arial", 9, "bold" if is_selected else "normal"))
-        arq.pack(anchor=tk.W)
-        arq.bind("<Button-1>", selecionar_e_tocar)
+        # COLUNA DIREITA: Informações
+        right_col = tk.Frame(main_container, bg=bg)
+        right_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        right_col.bind("<Button-1>", selecionar_e_tocar)
         
-        part = f"🎤 {item['participante_nome']}"
-        if item['tom_ajuste'] != 0:
-            part += f" | Tom: {item['tom_ajuste']:+d}"
+        # Nome do participante
+        participante_label = tk.Label(
+            right_col,
+            text=f"🎤 {item.get('participante_nome', 'Sem nome')}",
+            bg=bg,
+            fg="white" if not item.get('ja_tocou') else "#888",
+            font=("Arial", 10, "bold" if is_selected or is_playing else "normal"),
+            anchor=tk.W,
+            justify=tk.LEFT
+        )
+        participante_label.pack(anchor=tk.W, fill=tk.X)
+        participante_label.bind("<Button-1>", selecionar_e_tocar)
         
-        p = tk.Label(info, text=part, bg=bg, fg="#888" if item['ja_tocou'] else "#AAA", font=("Arial", 7))
-        p.pack(anchor=tk.W)
-        p.bind("<Button-1>", selecionar_e_tocar)
+        # Nome da música
+        musica_nome = item.get('musica_nome', os.path.basename(item.get('arquivo_path', 'Sem arquivo')))
+        if len(musica_nome) > 30:
+            musica_nome = musica_nome[:27] + "..."
+        
+        musica_label = tk.Label(
+            right_col,
+            text=f"🎵 {musica_nome}",
+            bg=bg,
+            fg="#4CAF50" if is_playing else ("#AAA" if not item.get('ja_tocou') else "#666"),
+            font=("Arial", 9, "italic" if not is_selected else "normal"),
+            anchor=tk.W,
+            justify=tk.LEFT
+        )
+        musica_label.pack(anchor=tk.W, fill=tk.X, pady=(2, 0))
+        musica_label.bind("<Button-1>", selecionar_e_tocar)
+        
+        # Informações adicionais (tom, arquivo)
+        info_adicional = []
+        
+        if item.get('tom_ajuste', 0) != 0:
+            info_adicional.append(f"Tom: {item['tom_ajuste']:+d}")
+        
+        # Nome do arquivo (código ou nome curto)
+        arquivo_nome = os.path.basename(item.get('arquivo_path', ''))
+        if len(arquivo_nome) > 20:
+            arquivo_nome = arquivo_nome[:17] + "..."
+        info_adicional.append(f"📁 {arquivo_nome}")
+        
+        if info_adicional:
+            info_text = " | ".join(info_adicional)
+            info_label = tk.Label(
+                right_col,
+                text=info_text,
+                bg=bg,
+                fg="#666" if item.get('ja_tocou') else "#888",
+                font=("Arial", 7),
+                anchor=tk.W
+            )
+            info_label.pack(anchor=tk.W, pady=(2, 0))
+            info_label.bind("<Button-1>", selecionar_e_tocar)
     
     def tocar_musica_playlist(self, index):
         """Toca uma música específica da playlist pelo índice"""

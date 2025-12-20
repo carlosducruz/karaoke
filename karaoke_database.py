@@ -1,17 +1,24 @@
 import sqlite3
 import json
 from datetime import datetime
-
+import csv  
 
 class KaraokeDatabase:
+ 
+
+    def __init__(self, db_path="karaoke_eventos.db"):
+        self.db_path = db_path
+        self.init_database()
+
     def limpar_catalogo(self):
-        """Remove todos os registros do catálogo de músicas."""
-        self.criar_tabela_catalogo()
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM catalogo")
-        conn.commit()
-        conn.close()
+            """Remove todos os registros do catálogo de músicas."""
+            self.criar_tabela_catalogo()
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM catalogo")
+            conn.commit()
+            conn.close()
+        
     def criar_tabela_catalogo(self):
         """Cria a tabela do catálogo se não existir"""
         conn = sqlite3.connect(self.db_path)
@@ -28,36 +35,81 @@ class KaraokeDatabase:
         conn.commit()
         conn.close()
 
-    def importar_catalogo_pdf(self, pdf_path):
-        """Importa o catálogo do PDF para o banco de dados. Retorna número de músicas importadas."""
+    def importar_catalogo_csv(self, csv_path):
+        """Importa o catálogo do CSV para o banco de dados. Retorna número de músicas importadas."""
         import os
-        try:
-            from PyPDF2 import PdfReader
-        except ImportError:
-            raise ImportError("PyPDF2 não instalado. Instale com: pip install PyPDF2")
-        if not os.path.exists(pdf_path):
-            raise FileNotFoundError(f"Arquivo não encontrado: {pdf_path}")
+        if not os.path.exists(csv_path):
+            raise FileNotFoundError(f"Arquivo não encontrado: {csv_path}")
+        
         self.criar_tabela_catalogo()
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        reader = PdfReader(pdf_path)
+        
         linhas = []
-        for page in reader.pages:
-            text = page.extract_text()
-            if text:
-                for linha in text.splitlines():
-                    partes = [p.strip() for p in linha.split('|')]
-                    if len(partes) == 4:
-                        linhas.append(partes)
+        linhas_importadas = 0
+        
+        try:
+            with open(csv_path, 'r', encoding='utf-8') as csv_file:
+                # Verifica se o arquivo tem BOM (Byte Order Mark)
+                content = csv_file.read()
+                has_bom = content.startswith('\ufeff')
+                if has_bom:
+                    content = content[1:]
+                
+                # Processa o conteúdo
+                import io
+                csv_reader = csv.reader(io.StringIO(content), delimiter=',')
+                
+                # Pula o cabeçalho
+                next(csv_reader, None)
+                
+                for row_num, row in enumerate(csv_reader, 2):  # Começa da linha 2 (após cabeçalho)
+                    if len(row) >= 4:
+                        cantor = row[0].strip()
+                        cod = str(row[1]).strip()
+                        musica = row[2].strip()
+                        inicio = row[3].strip()
+                        
+                        # Remove .0 do código se existir
+                        if cod.endswith('.0'):
+                            cod = cod[:-2]
+                        
+                        linhas.append((cantor, cod, musica, inicio))
+                        linhas_importadas += 1
+                    else:
+                        print(f"[AVISO] Linha {row_num} ignorada - formato inválido: {row}")
+        
+        except UnicodeDecodeError:
+            # Tenta com encoding diferente
+            with open(csv_path, 'r', encoding='latin-1') as csv_file:
+                csv_reader = csv.reader(csv_file, delimiter=',')
+                next(csv_reader, None)  # Pula cabeçalho
+                
+                for row_num, row in enumerate(csv_reader, 2):
+                    if len(row) >= 4:
+                        cantor = row[0].strip()
+                        cod = str(row[1]).strip()
+                        musica = row[2].strip()
+                        inicio = row[3].strip()
+                        
+                        if cod.endswith('.0'):
+                            cod = cod[:-2]
+                        
+                        linhas.append((cantor, cod, musica, inicio))
+                        linhas_importadas += 1
+        
         # Logging: print detalhado para cada linha importada
         for idx, (cantor, cod, musica, inicio) in enumerate(linhas, 1):
-            cursor.execute("INSERT INTO catalogo (cantor, cod, musica, inicio) VALUES (?, ?, ?, ?)", (cantor, cod, musica, inicio))
+            cursor.execute("INSERT INTO catalogo (cantor, cod, musica, inicio) VALUES (?, ?, ?, ?)", 
+                        (cantor, cod, musica, inicio))
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
             print(f"[{now}] Incluindo catálogo {idx}: cantor='{cantor}', cod='{cod}', musica='{musica}', inicio='{inicio}'")
+        
         conn.commit()
         conn.close()
-        return len(linhas)
+        return linhas_importadas
 
+    # Mantenha o método buscar_catalogo existente para compatibilidade
     def buscar_catalogo(self, termo=None, limite=None):
         """Busca músicas/cantores/códigos no catálogo. Retorna lista de tuplas."""
         self.criar_tabela_catalogo()
@@ -77,9 +129,6 @@ class KaraokeDatabase:
         rows = cursor.fetchall()
         conn.close()
         return rows
-    def __init__(self, db_path="karaoke_eventos.db"):
-        self.db_path = db_path
-        self.init_database()
 
     def remover_participante(self, participante_id):
         """Remove um participante e todas as suas músicas da playlist"""

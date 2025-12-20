@@ -233,7 +233,7 @@ class KaraokePlayer:
 
         tk.Button(
             botoes_frame,
-            text="📚 Importar Catálogo",
+            text="📚 Importar Catálogo  (CSV)",
             command=self.carregar_catalogo,
             bg="#FF9800",
             fg="white",
@@ -1046,39 +1046,47 @@ class KaraokePlayer:
             self.player.pause()
             self.is_playing = False
 
+
     def carregar_catalogo(self):
-        """Limpa o catálogo e importa o PDF selecionado para o banco de dados."""
+        """Limpa o catálogo e importa o CSV selecionado para o banco de dados."""
         try:
             from tkinter import filedialog, messagebox
-            pdf_path = filedialog.askopenfilename(
-                title="Selecione o arquivo PDF do catálogo",
-                filetypes=[("PDF", "*.pdf"), ("Todos os arquivos", "*.*")]
+            csv_path = filedialog.askopenfilename(
+                title="Selecione o arquivo CSV do catálogo",
+                filetypes=[("CSV", "*.csv"), ("Todos os arquivos", "*.*")]
             )
-            if not pdf_path:
-                self.debug_log("[CATALOGO] Nenhum arquivo PDF selecionado.")
+            if not csv_path:
+                self.debug_log("[CATALOGO] Nenhum arquivo CSV selecionado.")
                 return
-            self.debug_log(f"[CATALOGO] PDF selecionado: {pdf_path}")
+            
+            self.debug_log(f"[CATALOGO] CSV selecionado: {csv_path}")
             db = KaraokeDatabase()
-            if messagebox.askyesno("Limpar Catálogo", "Deseja limpar o catálogo antes de importar? (Isso removerá todas as músicas do catálogo atual)"):
+            
+            # Pergunta se deseja limpar o catálogo antes
+            if messagebox.askyesno("Limpar Catálogo", 
+                                "Deseja limpar o catálogo antes de importar?\n(Isso removerá todas as músicas do catálogo atual)"):
                 self.debug_log("[CATALOGO] Limpando catálogo antes de importar.")
                 db.limpar_catalogo()
-            self.show_progress("Importando catálogo...")
+            
+            self.show_progress("Importando catálogo CSV...")
             self.root.update()
-            num = db.importar_catalogo_pdf(pdf_path)
+            
+            # Importa o CSV
+            num = db.importar_catalogo_csv(csv_path)
+            
             self.hide_progress()
             self.debug_log(f"[CATALOGO] Importação concluída. {num} músicas importadas.")
-            messagebox.showinfo("Catálogo", f"Catálogo importado com sucesso! {num} músicas adicionadas.")
-        except ImportError:
-            self.debug_log("[CATALOGO] ERRO: PyPDF2 não está instalado.")
-            messagebox.showerror("Erro", "PyPDF2 não está instalado. Instale com: pip install PyPDF2")
+            messagebox.showinfo("Catálogo", f"Catálogo CSV importado com sucesso!\n{num} músicas adicionadas.")
+        
         except FileNotFoundError as e:
             self.debug_log(f"[CATALOGO] ERRO: {e}")
             messagebox.showerror("Erro", str(e))
+        
         except Exception as e:
             self.debug_log(f"[CATALOGO] ERRO: {e}")
             self.hide_progress()
-            messagebox.showerror("Erro", f"Erro ao importar catálogo:\n{e}")
-    
+            messagebox.showerror("Erro", f"Erro ao importar catálogo CSV:\n{e}")
+
     def stop(self):
         self.player.stop()
         self.is_playing = False

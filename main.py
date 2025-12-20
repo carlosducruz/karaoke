@@ -115,7 +115,197 @@ class KaraokePlayer:
         
         self.setup_ui()
         self.update_timer()
+ 
+ 
+    def abrir_busca_catalogo(self):
+        """Abre uma janela para buscar músicas/cantores/códigos no catálogo importado."""
+        busca_win = tk.Toplevel(self.root)
+        busca_win.title("Buscar no Catálogo")
+        busca_win.geometry("800x500")
+        busca_win.configure(bg="#222")
+
+        # Consulta quantidade de músicas no catálogo
+        try:
+            db = KaraokeDatabase()
+            total_musicas = len(db.buscar_catalogo())
+        except Exception:
+            total_musicas = 0
+
+        header_text = f"Buscar no Catálogo  (Músicas disponíveis: {total_musicas})"
+        tk.Label(busca_win, text=header_text, font=("Arial", 16, "bold"), bg="#222", fg="white").pack(pady=10)
+
+        # Frame de busca
+        search_frame = tk.Frame(busca_win, bg="#222")
+        search_frame.pack(pady=5)
         
+        tk.Label(search_frame, text="Termo:", bg="#222", fg="white", font=("Arial", 11)).pack(side=tk.LEFT)
+        termo_var = tk.StringVar()
+        termo_entry = tk.Entry(search_frame, textvariable=termo_var, font=("Arial", 12), width=30)
+        termo_entry.pack(side=tk.LEFT, padx=8)
+
+        # Botão buscar
+        tk.Button(
+            search_frame, 
+            text="Buscar", 
+            command=lambda: buscar(),
+            bg="#2196F3", 
+            fg="white", 
+            font=("Arial", 10, "bold"), 
+            padx=10, 
+            pady=4
+        ).pack(side=tk.LEFT, padx=8)
+
+        # Frame de resultados
+        result_frame = tk.Frame(busca_win, bg="#222")
+        result_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Treeview
+        columns = ("Código", "Cantor", "Música", "Início")
+        tree = ttk.Treeview(result_frame, columns=columns, show="headings", height=15)
+        
+        for col in columns:
+            tree.heading(col, text=col)
+            tree.column(col, width=100 if col == "Código" else 150)
+        
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        scrollbar = tk.Scrollbar(result_frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Frame para botões
+        btn_frame = tk.Frame(busca_win, bg="#222", pady=10)
+        btn_frame.pack(fill=tk.X)
+
+        # Função de busca
+        def buscar():
+            termo = termo_var.get().strip()
+            db = KaraokeDatabase()
+            try:
+                resultados = db.buscar_catalogo(termo) if termo else db.buscar_catalogo()
+            except Exception as e:
+                messagebox.showerror("Erro", f"Erro ao buscar catálogo:\n{e}")
+                return
+            
+            tree.delete(*tree.get_children())
+            for row in resultados:
+                tree.insert("", tk.END, values=row)
+
+        # Função quando clica em uma linha
+        def on_double_click(event):
+            selection = tree.selection()
+            if not selection:
+                return
+                
+            item = tree.item(selection[0])
+            valores = item['values']
+            codigo = str(valores[1])  # Código está na segunda coluna
+            
+            # Buscar arquivo MP4
+            arquivo_encontrado = self.buscar_arquivo_mp4(codigo)
+            
+            if arquivo_encontrado:
+                resposta = messagebox.askyesno(
+                    "Música Encontrada",
+                    f"🎤 Cantor: {valores[0]}\n🎵 Música: {valores[2]}\n🔢 Código: {codigo}\n\n"
+                    f"📁 Arquivo: {os.path.basename(arquivo_encontrado)}\n\n"
+                    "Deseja carregar esta música?"
+                )
+                
+                if resposta:
+                    # Carrega o arquivo
+                    self.video_file = arquivo_encontrado
+                    self.processed_file = arquivo_encontrado
+                    self.pitch_shift = 0
+                    self.pitch_label.config(text="0")
+                    self.file_label.config(text=f"{valores[1]} - {valores[2]}")
+                    self.show_first_frame()
+                    self.status_label.config(text=f"✓ Música carregada: {valores[2]}")
+                    busca_win.destroy()
+                    
+                    # Adiciona à playlist do modo normal
+                    if not self.modo_evento_ativo:
+                        self.playlist_items.append({
+                            'arquivo_path': arquivo_encontrado,
+                            'participante_nome': valores[1],
+                            'tom_ajuste': 0,
+                            'ja_tocou': False,
+                            'ordem': len(self.playlist_items) + 1,
+                            'musica_nome': valores[2]
+                        })
+                        self.atualizar_playlist_visual()
+            else:
+                messagebox.showerror(
+                    "Arquivo não encontrado",
+                    f"Não foi possível encontrar o arquivo para o código: {codigo}\n\n"
+                    f"Procurando por: '{codigo}.mp4' em D:\\musicas"
+                )
+
+        # Botão para carregar música selecionada
+        tk.Button(
+            btn_frame,
+            text="🎵 Carregar Música Selecionada",
+            command=lambda: on_double_click(None),
+            bg="#4CAF50",
+            fg="white",
+            font=("Arial", 11, "bold"),
+            padx=15,
+            pady=8,
+            cursor="hand2"
+        ).pack(pady=5)
+
+        # Botão Fechar
+        tk.Button(
+            btn_frame,
+            text="Fechar",
+            command=busca_win.destroy,
+            bg="#666666",
+            fg="white",
+            font=("Arial", 10),
+            padx=15,
+            pady=5
+        ).pack(pady=5)
+
+        # Configurações
+        tree.bind("<Double-1>", on_double_click)  # Duplo clique na linha
+        termo_entry.bind("<Return>", lambda e: buscar())
+        busca_win.bind("<Escape>", lambda e: busca_win.destroy())
+
+        # Busca inicial
+        buscar()
+            
+    def buscar_arquivo_mp4(self, codigo):
+        """Busca arquivo MP4 na pasta D:\TeraBoxDownload e subpastas"""
+        base_path = r"D:\TeraBoxDownload"
+        
+        # Converte para string e completa com zeros à esquerda até ter 5 dígitos
+        codigo_str = str(codigo).strip()
+        
+        # Se for numérico, completa com zeros
+        if codigo_str.isdigit():
+            codigo_formatado = codigo_str.zfill(5)
+        else:
+            codigo_formatado = codigo_str
+        
+        arquivo_nome = f"{codigo_formatado}.mp4"
+        
+        if not os.path.exists(base_path):
+            messagebox.showwarning(
+                "Pasta não encontrada",
+                f"A pasta D:\\TeraBoxDownload não foi encontrada.\nVerifique se ela existe."
+            )
+            return None
+            
+        # Procura recursivamente
+        for root, dirs, files in os.walk(base_path):
+            for file in files:
+                # Compara tanto o nome formatado quanto o original
+                if file.lower() == arquivo_nome.lower() or \
+                (codigo_str != codigo_formatado and file.lower() == f"{codigo_str}.mp4".lower()):
+                    return os.path.join(root, file)
+        
+        return None
+
     def setup_ui(self):
         self.debug_log("Configurando interface...")
         
@@ -200,7 +390,7 @@ class KaraokePlayer:
         botoes_frame = tk.Frame(botoes_outer_frame, bg="#23233a")
         botoes_frame.pack(padx=10, pady=10, fill=tk.X)
 
-        btn_width = 20
+        btn_width = 22
         btn_height = 2
         btn_padx = 8
         btn_pady = 8
@@ -213,15 +403,28 @@ class KaraokePlayer:
                 command=self.abrir_modo_evento,
                 bg="#9C27B0",
                 fg="white",
-                font=("Arial", 11, "bold"),
+                font=("Arial", 10, "bold"),
                 cursor="hand2",
                 width=btn_width,
                 height=btn_height
             ).pack(side=tk.LEFT, padx=btn_padx, pady=btn_pady)
 
+
         tk.Button(
             botoes_frame,
-            text="📁 Carregar MP4",
+            text="🔎 Buscar no Catálogo",
+            command=self.abrir_busca_catalogo,
+            bg="#2196F3",
+            fg="white",
+            font=("Arial", 10, "bold"),
+            cursor="hand2",
+            width=btn_width,
+            height=btn_height
+        ).pack(side=tk.LEFT, padx=btn_padx, pady=btn_pady)
+
+        tk.Button(
+            botoes_frame,
+            text="📁 Carregar Qualquer MP4",
             command=self.load_file,
             bg="#4CAF50",
             fg="white",
@@ -233,7 +436,7 @@ class KaraokePlayer:
 
         tk.Button(
             botoes_frame,
-            text="📚 Importar Catálogo  (CSV)",
+            text="📚 Importar Catálogo (CSV)",
             command=self.carregar_catalogo,
             bg="#FF9800",
             fg="white",
@@ -242,19 +445,6 @@ class KaraokePlayer:
             width=btn_width,
             height=btn_height
         ).pack(side=tk.LEFT, padx=btn_padx, pady=btn_pady)
-
-        tk.Button(
-            botoes_frame,
-            text="🔎 Consultar Catálogo",
-            command=self.abrir_busca_catalogo,
-            bg="#2196F3",
-            fg="white",
-            font=("Arial", 10, "bold"),
-            cursor="hand2",
-            width=btn_width,
-            height=btn_height
-        ).pack(side=tk.LEFT, padx=btn_padx, pady=btn_pady)
-
 
 
         # Frame horizontal para pitch e controles de reprodução

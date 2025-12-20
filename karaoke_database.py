@@ -35,6 +35,33 @@ class KaraokeDatabase:
         conn.commit()
         conn.close()
 
+      
+    def adicionar_musica_playlist(self, evento_id, participante_id, arquivo_path, 
+                                tom_ajuste=0, duracao_segundos=0, codigo_musica=None):
+        """Adiciona uma música à playlist"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Obter próxima ordem
+        cursor.execute("""
+            SELECT MAX(ordem) FROM playlist WHERE evento_id = ?
+        """, (evento_id,))
+        max_ordem = cursor.fetchone()[0]
+        ordem = (max_ordem or 0) + 1
+        
+        cursor.execute("""
+            INSERT INTO playlist (evento_id, participante_id, arquivo_path, 
+                                tom_ajuste, ordem, duracao_segundos)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (evento_id, participante_id, arquivo_path, tom_ajuste, ordem, duracao_segundos))
+        
+        musica_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        
+        return musica_id
+    
+        
     def importar_catalogo_csv(self, csv_path):
         """Importa o catálogo do CSV para o banco de dados. Retorna número de músicas importadas."""
         import os
@@ -129,6 +156,31 @@ class KaraokeDatabase:
         rows = cursor.fetchall()
         conn.close()
         return rows
+
+    # Adicione este método após o método buscar_catalogo
+
+    def buscar_musica_por_codigo(self, codigo):
+        """Busca uma música específica pelo código"""
+        self.criar_tabela_catalogo()
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT cantor, cod, musica, inicio FROM catalogo
+            WHERE cod = ?
+        """, (codigo,))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            return {
+                'cantor': row[0],
+                'cod': row[1],
+                'musica': row[2],
+                'inicio': row[3]
+            }
+        return None
 
     def remover_participante(self, participante_id):
         """Remove um participante e todas as suas músicas da playlist"""
@@ -301,31 +353,7 @@ class KaraokeDatabase:
         
         conn.close()
         return participantes
-    
-    def adicionar_musica_playlist(self, evento_id, participante_id, arquivo_path, 
-                                   tom_ajuste=0, duracao_segundos=0):
-        """Adiciona uma música à playlist"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Obter próxima ordem
-        cursor.execute("""
-            SELECT MAX(ordem) FROM playlist WHERE evento_id = ?
-        """, (evento_id,))
-        max_ordem = cursor.fetchone()[0]
-        ordem = (max_ordem or 0) + 1
-        
-        cursor.execute("""
-            INSERT INTO playlist (evento_id, participante_id, arquivo_path, 
-                                 tom_ajuste, ordem, duracao_segundos)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (evento_id, participante_id, arquivo_path, tom_ajuste, ordem, duracao_segundos))
-        
-        musica_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
-        
-        return musica_id
+     
     
     def obter_playlist(self, evento_id):
         """Obtém a playlist completa do evento"""

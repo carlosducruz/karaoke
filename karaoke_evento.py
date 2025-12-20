@@ -361,7 +361,41 @@ class ModoEventoWindow:
             padx=20,
             pady=8
         ).pack(pady=15)
-    
+        
+    def buscar_arquivo_mp4(self, codigo):
+        """Busca arquivo MP4 na pasta D:\TeraBoxDownload e subpastas"""
+        base_path = r"D:\TeraBoxDownload"
+        
+        # Converte para string e remove espaços
+        codigo_str = str(codigo).strip()
+        
+        # Se for numérico e tiver menos de 5 dígitos, completa com zeros à esquerda
+        if codigo_str.isdigit() and len(codigo_str) < 5:
+            codigo_formatado = codigo_str.zfill(5)
+        else:
+            codigo_formatado = codigo_str
+        
+        arquivo_nome = f"{codigo_formatado}.mp4"
+        
+        if not os.path.exists(base_path):
+            messagebox.showwarning(
+                "Pasta não encontrada",
+                f"A pasta D:\\TeraBoxDownload não foi encontrada.\nVerifique se ela existe."
+            )
+            return None
+            
+        # Procura recursivamente
+        for root, dirs, files in os.walk(base_path):
+            for file in files:
+                # Tenta o nome formatado
+                if file.lower() == arquivo_nome.lower():
+                    return os.path.join(root, file)
+                # Tenta também o nome original (sem zeros à esquerda)
+                if codigo_formatado != codigo_str and file.lower() == f"{codigo_str}.mp4".lower():
+                    return os.path.join(root, file)
+        
+        return None
+
     def mostrar_tela_playlist(self):
         """Tela principal da playlist do evento"""
         self.limpar_janela()
@@ -572,9 +606,9 @@ class ModoEventoWindow:
             padx=15,
             pady=8
         ).pack(side=tk.LEFT, padx=5)
-    
+        
     def adicionar_musica(self):
-        """Dialog para adicionar música à playlist"""
+        """Dialog para adicionar música à playlist - com busca no catálogo"""
         participantes = self.db.obter_participantes(self.evento_atual['id'])
         
         if not participantes:
@@ -587,86 +621,222 @@ class ModoEventoWindow:
             return
         
         dialog = tk.Toplevel(self.window)
-        dialog.title("Adicionar Música")
-        dialog.geometry("450x300")
+        dialog.title("Adicionar Música - Busca no Catálogo")
+        dialog.geometry("700x500")
         dialog.configure(bg="#1a1a1a")
         dialog.transient(self.window)
         dialog.grab_set()
         
+        # Variável para armazenar a música selecionada
+        self.musica_selecionada = None
+        
+        # Frame superior - busca
+        top_frame = tk.Frame(dialog, bg="#1a1a1a")
+        top_frame.pack(fill=tk.X, padx=10, pady=10)
+        
         tk.Label(
-            dialog,
-            text="Participante:",
+            top_frame,
+            text="Buscar no Catálogo:",
             bg="#1a1a1a",
             fg="white",
             font=("Arial", 11)
-        ).pack(pady=10)
+        ).pack(side=tk.LEFT, padx=(0, 5))
+        
+        busca_var = tk.StringVar()
+        busca_entry = tk.Entry(
+            top_frame,
+            textvariable=busca_var,
+            font=("Arial", 10),
+            width=30
+        )
+        busca_entry.pack(side=tk.LEFT, padx=5)
+        
+        def buscar():
+            termo = busca_var.get().strip()
+            resultados = self.db.buscar_catalogo(termo) if termo else self.db.buscar_catalogo()
+            tree.delete(*tree.get_children())
+            for row in resultados:
+                tree.insert("", tk.END, values=row, tags=('item',))
+        
+        tk.Button(
+            top_frame,
+            text="🔍 Buscar",
+            command=buscar,
+            bg="#2196F3",
+            fg="white",
+            font=("Arial", 9),
+            cursor="hand2",
+            padx=8
+        ).pack(side=tk.LEFT, padx=5)
+        
+        # Frame do meio - resultados
+        mid_frame = tk.Frame(dialog, bg="#1a1a1a")
+        mid_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        # Treeview com configurações especiais
+        columns = ("Código", "Cantor", "Música", "Início")
+        tree = ttk.Treeview(mid_frame, columns=columns, show="headings", height=8)
+        
+        for col in columns:
+            tree.heading(col, text=col)
+            if col == "Código":
+                tree.column(col, width=80)
+            elif col == "Início":
+                tree.column(col, width=60)
+            else:
+                tree.column(col, width=120)
+        
+        # Configurar tags para seleção
+        tree.tag_configure('item', foreground='white')
+        tree.tag_configure('selected', background='#4CAF50', foreground='white')
+        
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        scrollbar = tk.Scrollbar(mid_frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Frame inferior - informações e controles
+        bottom_frame = tk.Frame(dialog, bg="#1a1a1a")
+        bottom_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        # Informações da música selecionada
+        info_frame = tk.Frame(bottom_frame, bg="#2d2d2d", relief=tk.SUNKEN, bd=1)
+        info_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        selecionado_label = tk.Label(
+            info_frame,
+            text="Selecione uma música do catálogo acima",
+            bg="#2d2d2d",
+            fg="#888888",
+            font=("Arial", 9),
+            wraplength=600,
+            justify=tk.LEFT,
+            pady=5
+        )
+        selecionado_label.pack(padx=5, pady=5)
+        
+        # Controles
+        ctrl_frame = tk.Frame(bottom_frame, bg="#1a1a1a")
+        ctrl_frame.pack(fill=tk.X, pady=5)
+        
+        # Participante
+        tk.Label(
+            ctrl_frame,
+            text="Participante:",
+            bg="#1a1a1a",
+            fg="white",
+            font=("Arial", 10)
+        ).pack(side=tk.LEFT, padx=(0, 5))
         
         participante_var = tk.StringVar()
         participante_combo = ttk.Combobox(
-            dialog,
+            ctrl_frame,
             textvariable=participante_var,
             values=[p['nome'] for p in participantes],
             state="readonly",
-            font=("Arial", 11),
-            width=30
-        )
-        participante_combo.pack(pady=5)
-        participante_combo.current(0)
-        
-        arquivo_var = tk.StringVar()
-        
-        def escolher_arquivo():
-            path = filedialog.askopenfilename(
-                title="Escolher Música MP4",
-                filetypes=[
-                    ("Arquivos MP4", "*.mp4"),
-                    ("Todos", "*.*")
-                ],
-                parent=dialog
-            )
-            if path:
-                arquivo_var.set(path)
-                arquivo_btn.config(text=f"✓ {os.path.basename(path)[:30]}")
-        
-        arquivo_btn = tk.Button(
-            dialog,
-            text="🎵 Escolher Arquivo MP4",
-            command=escolher_arquivo,
-            bg="#666666",
-            fg="white",
             font=("Arial", 10),
-            cursor="hand2",
-            padx=10,
-            pady=8
+            width=20
         )
-        arquivo_btn.pack(pady=15)
+        participante_combo.pack(side=tk.LEFT, padx=(0, 20))
+        if participantes:
+            participante_combo.current(0)
         
-        tom_frame = tk.Frame(dialog, bg="#1a1a1a")
-        tom_frame.pack(pady=10)
-        
+        # Tom
         tk.Label(
-            tom_frame,
+            ctrl_frame,
             text="Tom:",
             bg="#1a1a1a",
             fg="white",
             font=("Arial", 10)
-        ).pack(side=tk.LEFT, padx=5)
+        ).pack(side=tk.LEFT, padx=(0, 5))
         
         tom_var = tk.IntVar(value=0)
         tom_spin = tk.Spinbox(
-            tom_frame,
+            ctrl_frame,
             from_=-12,
             to=12,
             textvariable=tom_var,
-            width=5,
-            font=("Arial", 11)
+            width=4,
+            font=("Arial", 10)
         )
         tom_spin.pack(side=tk.LEFT)
         
-        def salvar():
-            if not arquivo_var.get():
-                messagebox.showerror("Erro", "Escolha um arquivo!", parent=dialog)
+        # Botões
+        btn_frame = tk.Frame(bottom_frame, bg="#1a1a1a")
+        btn_frame.pack(fill=tk.X, pady=10)
+        
+        def on_tree_select(event):
+            """Manipula a seleção no treeview"""
+            # Limpar seleção anterior
+            for item in tree.get_children():
+                tree.item(item, tags=('item',))
+            
+            selection = tree.selection()
+            if not selection:
+                self.musica_selecionada = None
                 return
+                
+            item = selection[0]
+            tree.item(item, tags=('selected',))
+            
+            valores = tree.item(item, 'values')
+            if not valores or len(valores) < 4:
+                self.musica_selecionada = None
+                return
+                
+            codigo = str(valores[1])
+            cantor = valores[0]
+            musica_nome = valores[2]
+            inicio = valores[3]
+            
+            # Buscar arquivo
+            arquivo_encontrado = self.buscar_arquivo_mp4(codigo)
+            
+            # Armazenar dados da música selecionada
+            self.musica_selecionada = {
+                'codigo': codigo,
+                'cantor': cantor,
+                'musica': musica_nome,
+                'inicio': inicio,
+                'arquivo': arquivo_encontrado
+            }
+            
+            # Atualizar label
+            if arquivo_encontrado:
+                selecionado_label.config(
+                    text=f"🎤 {cantor} - {musica_nome}\n"
+                        f"🔢 Código: {codigo}\n"
+                        f"✓ Arquivo encontrado: {os.path.basename(arquivo_encontrado)}",
+                    fg="#4CAF50"
+                )
+            else:
+                selecionado_label.config(
+                    text=f"🎤 {cantor} - {musica_nome}\n"
+                        f"🔢 Código: {codigo}\n"
+                        f"❌ Arquivo não encontrado para código: {codigo}",
+                    fg="#f44336"
+                )
+        
+        # Configurar eventos do treeview
+        tree.bind('<<TreeviewSelect>>', on_tree_select)
+        tree.bind('<ButtonRelease-1>', on_tree_select)
+        
+        def salvar():
+            """Salva a música na playlist"""
+            if not self.musica_selecionada:
+                messagebox.showerror("Erro", "Selecione uma música do catálogo primeiro!", parent=dialog)
+                return
+                
+            if not self.musica_selecionada['arquivo']:
+                resposta = messagebox.askyesno(
+                    "Arquivo não encontrado", 
+                    f"Arquivo não encontrado para código: {self.musica_selecionada['codigo']}\n\n"
+                    f"Deseja adicionar mesmo assim?",
+                    parent=dialog
+                )
+                if not resposta:
+                    return
             
             # Encontrar ID do participante
             nome_selecionado = participante_var.get()
@@ -676,19 +846,30 @@ class ModoEventoWindow:
                     participante_id = p['id']
                     break
             
+            if not participante_id:
+                messagebox.showerror("Erro", "Selecione um participante válido!", parent=dialog)
+                return
+            
+            # Usar o método adicionar_musica_playlist que agora deve buscar o arquivo
+            # Se não tivermos arquivo, usaremos um caminho baseado no código
+            arquivo_path = self.musica_selecionada['arquivo'] or f"D:\\TeraBoxDownload\\{self.musica_selecionada['codigo']}.mp4"
+            
+            # Adiciona à playlist
             self.db.adicionar_musica_playlist(
-                self.evento_atual['id'],
-                participante_id,
-                arquivo_var.get(),
-                tom_var.get()
+                evento_id=self.evento_atual['id'],
+                participante_id=participante_id,
+                arquivo_path=arquivo_path,
+                tom_ajuste=tom_var.get(),
+                codigo_musica=self.musica_selecionada['codigo']  # Novo parâmetro
             )
             
             self.atualizar_playlist()
             dialog.destroy()
+            messagebox.showinfo("Sucesso", "Música adicionada à playlist!", parent=self.window)
         
         tk.Button(
-            dialog,
-            text="Adicionar à Playlist",
+            btn_frame,
+            text="✅ Adicionar à Playlist",
             command=salvar,
             bg="#4CAF50",
             fg="white",
@@ -696,8 +877,27 @@ class ModoEventoWindow:
             cursor="hand2",
             padx=20,
             pady=8
-        ).pack(pady=15)
-    
+        ).pack(side=tk.LEFT, padx=5)
+        
+        tk.Button(
+            btn_frame,
+            text="❌ Cancelar",
+            command=dialog.destroy,
+            bg="#f44336",
+            fg="white",
+            font=("Arial", 10),
+            cursor="hand2",
+            padx=15,
+            pady=5
+        ).pack(side=tk.RIGHT, padx=5)
+        
+        # Busca inicial
+        buscar()
+        
+        # Focar no treeview
+        dialog.after(100, lambda: tree.focus_set())
+
+
     def iniciar_evento(self):
         """Inicia a reprodução sequencial do evento"""
         proxima = self.db.obter_proxima_musica(self.evento_atual['id'])

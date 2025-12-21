@@ -363,8 +363,8 @@ class ModoEventoWindow:
         ).pack(pady=15)
         
     def buscar_arquivo_mp4(self, codigo):
-        """Busca arquivo MP4 na pasta D:\TeraBoxDownload e subpastas"""
-        base_path = r"D:\TeraBoxDownload"
+        """Busca arquivo MP4 na pasta C:\\temp\\musicas e subpastas"""
+        base_path = r"C:\\temp\\musicas"
         
         # Converte para string e remove espaços
         codigo_str = str(codigo).strip()
@@ -380,7 +380,7 @@ class ModoEventoWindow:
         if not os.path.exists(base_path):
             messagebox.showwarning(
                 "Pasta não encontrada",
-                f"A pasta D:\\TeraBoxDownload não foi encontrada.\nVerifique se ela existe."
+                f"A pasta C:\\temp\\musicas não foi encontrada.\nVerifique se ela existe."
             )
             return None
             
@@ -873,7 +873,7 @@ class ModoEventoWindow:
             
             # Usar o método adicionar_musica_playlist que agora deve buscar o arquivo
             # Se não tivermos arquivo, usaremos um caminho baseado no código
-            arquivo_path = self.musica_selecionada['arquivo'] or f"D:\\TeraBoxDownload\\{self.musica_selecionada['codigo']}.mp4"
+            arquivo_path = self.musica_selecionada['arquivo'] or f"C:\\temp\\musicas\\{self.musica_selecionada['codigo']}.mp4"
             
             # Adiciona à playlist
             self.db.adicionar_musica_playlist(

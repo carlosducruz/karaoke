@@ -21,69 +21,102 @@ except ImportError:
     print("AVISO: Módulos de evento não encontrados. Modo Evento desabilitado.")
 
 class KaraokePlayer:
+    
     def abrir_busca_catalogo(self):
         """Abre uma janela para buscar músicas/cantores/códigos no catálogo importado."""
-
         busca_win = tk.Toplevel(self.root)
         busca_win.title("Buscar no Catálogo")
-        busca_win.geometry("700x500")
+        busca_win.geometry("800x500")
         busca_win.configure(bg="#222")
 
-        # Consulta quantidade de músicas no catálogo
-        try:
-            db = KaraokeDatabase()
-            total_musicas = len(db.buscar_catalogo())
-        except Exception:
-            total_musicas = 0
+        # ... código anterior do método ...
 
-        header_text = f"Buscar no Catálogo  (Músicas disponíveis: {total_musicas})"
-        tk.Label(busca_win, text=header_text, font=("Arial", 16, "bold"), bg="#222", fg="white").pack(pady=10)
-
-        search_frame = tk.Frame(busca_win, bg="#222")
-        search_frame.pack(pady=5)
-        tk.Label(search_frame, text="Termo:", bg="#222", fg="white", font=("Arial", 11)).pack(side=tk.LEFT)
-        termo_var = tk.StringVar()
-        termo_entry = tk.Entry(search_frame, textvariable=termo_var, font=("Arial", 12), width=30)
-        termo_entry.pack(side=tk.LEFT, padx=8)
-
-        result_frame = tk.Frame(busca_win, bg="#222")
-        result_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-        columns = ("Cantor", "Código", "Música", "Início")
-        tree = ttk.Treeview(result_frame, columns=columns, show="headings", height=15)
-        for col in columns:
-            tree.heading(col, text=col)
-            tree.column(col, width=150 if col!="Música" else 250)
-        tree.pack(fill=tk.BOTH, expand=True)
-
-        scrollbar = tk.Scrollbar(result_frame, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        def buscar():
-            termo = termo_var.get().strip()
-            db = KaraokeDatabase()
-            try:
-                resultados = db.buscar_catalogo(termo) if termo else db.buscar_catalogo()
-            except Exception as e:
-                messagebox.showerror("Erro", f"Erro ao buscar catálogo:\n{e}")
+        # Função quando clica em uma linha
+        def on_double_click(event):
+            selection = tree.selection()
+            if not selection:
                 return
-            tree.delete(*tree.get_children())
-            for row in resultados:
-                tree.insert("", tk.END, values=row)
+                
+            item = tree.item(selection[0])
+            valores = item['values']
+            codigo = str(valores[1])  # Código está na segunda coluna
+            cantor = valores[0]
+            musica = valores[2]
+            
+            # Buscar arquivo MP4
+            arquivo_encontrado = self.buscar_arquivo_mp4(codigo)
+            
+            if arquivo_encontrado:
+                resposta = messagebox.askyesno(
+                    "Música Encontrada",
+                    f"🎤 Cantor: {cantor}\n🎵 Música: {musica}\n🔢 Código: {codigo}\n\n"
+                    f"📁 Arquivo: {os.path.basename(arquivo_encontrado)}\n\n"
+                    "Deseja carregar e iniciar esta música?"  # TEXTO ALTERADO
+                )
+                
+                if resposta:
+                    # Carrega o arquivo
+                    self.video_file = arquivo_encontrado
+                    self.processed_file = arquivo_encontrado
+                    self.pitch_shift = 0
+                    self.pitch_label.config(text="0")
+                    # Atualiza o pitch_var do Spinbox também, se existir
+                    if hasattr(self, 'pitch_var'):
+                        self.pitch_var.set(0)
+                    
+                    self.file_label.config(text=f"{codigo} - {musica}")
+                    
+                    # Obtém informações do vídeo
+                    try:
+                        result = subprocess.run([
+                            'ffprobe', '-v', 'quiet', '-print_format', 'json',
+                            '-show_format', '-show_streams', arquivo_encontrado
+                        ], capture_output=True, text=True, check=True)
+                        
+                        info = json.loads(result.stdout)
+                        for stream in info['streams']:
+                            if stream['codec_type'] == 'video':
+                                self.fps = eval(stream.get('r_frame_rate', '30/1'))
+                                self.width = stream['width']
+                                self.height = stream['height']
+                                break
+                        self.duration = float(info['format']['duration'])
+                    except:
+                        pass
+                    
+                    self.show_first_frame()
+                    self.status_label.config(text=f"✓ {musica} carregada! Iniciando...")
+                    busca_win.destroy()
+                    
+                    # Adiciona à playlist do modo normal COM NOME DA MÚSICA
+                    if not self.modo_evento_ativo:
+                        self.playlist_items.append({
+                            'arquivo_path': arquivo_encontrado,
+                            'participante_nome': cantor,
+                            'musica_nome': musica,
+                            'tom_ajuste': 0,
+                            'ja_tocou': False,
+                            'ordem': len(self.playlist_items) + 1
+                        })
+                        self.atualizar_playlist_visual()
+                    
+                    # AUTOPLAY: Inicia reprodução automaticamente
+                    self.debug_log(f"🎬 Música do catálogo carregada - iniciando reprodução automática...")
+                    self.root.after(500, self.play)
+            else:
+                messagebox.showerror(
+                    "Arquivo não encontrado",
+                    f"Não foi possível encontrar o arquivo para o código: {codigo}\n\n"
+                    f"Procurando por: '{codigo}.mp4' em C:\\temp\\musicas"
+                )
 
-        tk.Button(search_frame, text="Buscar", command=buscar, bg="#2196F3", fg="white", font=("Arial", 10, "bold"), padx=10, pady=4).pack(side=tk.LEFT, padx=8)
-
-        # Busca inicial (todos)
-        buscar()
-
-        termo_entry.bind("<Return>", lambda e: buscar())
     def __init__(self, root):
         self.root = root
         self.root.title("Karaoke Player - MP4")
         self.root.geometry("1200x780")
         self.root.configure(bg="#1a1a1a")
-        
+        self.force_quit = False  # Adicione esta flag
+
         # LOG INICIAL
         self.debug_log("=" * 60)
         self.debug_log("KARAOKE PLAYER INICIADO")
@@ -116,6 +149,127 @@ class KaraokePlayer:
         self.setup_ui()
         self.update_timer()
  
+
+
+        
+    def fechar_aplicacao(self, confirmar=True):
+
+        """Fecha a aplicação com opção de confirmação"""
+        if confirmar:
+            from tkinter import messagebox
+            resposta = messagebox.askyesno(
+                "Fechar Karaoke Player",
+                "Deseja realmente fechar o Karaoke Player?\n\n" +
+                "✓ Reprodução será interrompida\n" +
+                "✓ Arquivos temporários serão removidos\n" +
+                "✓ Modo evento será salvo (se ativo)"
+            )
+            if not resposta:
+                return
+                
+        """Fecha a aplicação de forma limpa, liberando todos os recursos"""
+        if self.force_quit:
+            return
+            
+        self.force_quit = True
+        self.debug_log("=" * 60)
+        self.debug_log("🛑 FECHANDO KARAOKE PLAYER...")
+        self.debug_log(f"Data/Hora: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        # Mostrar status na interface
+        try:
+            self.status_label.config(text="🛑 Finalizando aplicação...", fg="#FF9800")
+            self.root.update()
+        except:
+            pass
+        
+        # Sinalizar para threads pararem
+        self.is_playing = False
+        self.progress_animation_running = False
+        
+        # Se estiver em modo evento, tentar salvar estado
+        if hasattr(self, 'modo_evento_ativo') and self.modo_evento_ativo:
+            self.debug_log("💾 Modo evento ativo - salvando estado...")
+            try:
+                if MODO_EVENTO_DISPONIVEL:
+                    from karaoke_database import KaraokeDatabase
+                    db = KaraokeDatabase()
+                    # Marcar música atual como pausada
+                    if self.musica_atual_evento:
+                        tempo = self.player.get_time() / 1000.0 if self.player else 0
+                        db.marcar_musica_pausada(self.musica_atual_evento['id'], tempo)
+                    db.fechar_conexao()
+                    self.debug_log("✅ Estado do evento salvo")
+            except Exception as e:
+                self.debug_log(f"⚠️ Erro ao salvar estado do evento: {e}")
+        
+        # Parar player VLC
+        if hasattr(self, 'player') and self.player:
+            try:
+                self.debug_log("⏹️ Parando player VLC...")
+                self.player.stop()
+                self.debug_log("✅ Player VLC parado")
+            except Exception as e:
+                self.debug_log(f"⚠️ Erro ao parar VLC: {e}")
+        
+        # Parar processo ffmpeg de vídeo
+        if hasattr(self, 'frame_process') and self.frame_process:
+            try:
+                self.debug_log("🛑 Finalizando processo ffmpeg de vídeo...")
+                self.frame_process.kill()
+                if hasattr(self.frame_process, 'wait'):
+                    self.frame_process.wait(timeout=1)
+                self.debug_log("✅ Processo ffmpeg finalizado")
+            except Exception as e:
+                self.debug_log(f"⚠️ Erro ao parar ffmpeg: {e}")
+        
+        # Parar qualquer processamento de pitch em andamento
+        if hasattr(self, 'processing_pitch') and self.processing_pitch:
+            self.debug_log("⚠️ Interrompendo processamento de pitch...")
+            self.processing_pitch = False
+        
+        # Limpar arquivos temporários
+        if hasattr(self, 'processed_file') and self.processed_file:
+            if self.processed_file != getattr(self, 'video_file', None):
+                try:
+                    if os.path.exists(self.processed_file):
+                        self.debug_log(f"🗑️ Removendo arquivo temporário: {self.processed_file}")
+                        os.unlink(self.processed_file)
+                        self.debug_log("✅ Arquivo temporário removido")
+                except Exception as e:
+                    self.debug_log(f"⚠️ Erro ao remover arquivo: {e}")
+        
+        # Fechar todas as janelas filhas (Toplevel)
+        try:
+            for widget in self.root.winfo_children():
+                if isinstance(widget, tk.Toplevel):
+                    try:
+                        widget.destroy()
+                    except:
+                        pass
+            self.debug_log("✅ Janelas filhas fechadas")
+        except:
+            pass
+        
+        self.debug_log("=" * 60)
+        self.debug_log("✅ KARAOKE PLAYER FINALIZADO COM SUCESSO")
+        self.debug_log("=" * 60)
+        
+        # Destruir janela principal
+        try:
+            self.root.quit()
+        except:
+            pass
+        
+        try:
+            self.root.destroy()
+        except:
+            pass
+        
+        # Forçar saída se necessário (último recurso)
+        import os
+        os._exit(0)
+
  
     def abrir_busca_catalogo(self):
         """Abre uma janela para buscar músicas/cantores/códigos no catálogo importado."""
@@ -237,10 +391,10 @@ class KaraokePlayer:
                         })
                         self.atualizar_playlist_visual()
             else:
-                messagebox.showerror(
+                messagebox.showerror( +
                     "Arquivo não encontrado",
                     f"Não foi possível encontrar o arquivo para o código: {codigo}\n\n"
-                    f"Procurando por: '{codigo}.mp4' em D:\\TeraBoxDownload"
+                    f"Procurando por: '{codigo}.mp4' em C:\\temp\\musicas"
                 )
 
         # Botão para carregar música selecionada
@@ -277,8 +431,8 @@ class KaraokePlayer:
         buscar()
             
     def buscar_arquivo_mp4(self, codigo):
-        """Busca arquivo MP4 na pasta D:\TeraBoxDownload e subpastas"""
-        base_path = r"D:\TeraBoxDownload"
+        """Busca arquivo MP4 na pasta C:\\temp\\musicas e subpastas"""
+        base_path = r"C:\\temp\\musicas"
         
         # Converte para string e completa com zeros à esquerda até ter 5 dígitos
         codigo_str = str(codigo).strip()
@@ -294,7 +448,7 @@ class KaraokePlayer:
         if not os.path.exists(base_path):
             messagebox.showwarning(
                 "Pasta não encontrada",
-                f"A pasta D:\\TeraBoxDownload não foi encontrada.\nVerifique se ela existe."
+                f"A pasta C:\\temp\\musicas não foi encontrada.\nVerifique se ela existe."
             )
             return None
             
@@ -1138,10 +1292,20 @@ class KaraokePlayer:
                 self.processed_file = path
                 self.pitch_shift = 0
                 self.pitch_label.config(text="0")
+                # Atualiza o pitch_var do Spinbox também, se existir
+                if hasattr(self, 'pitch_var'):
+                    self.pitch_var.set(0)
+                
                 self.file_label.config(text=os.path.basename(path))
                 self.show_first_frame()
-                self.status_label.config(text="✓ Pronto!")
+                self.status_label.config(text="✓ Carregado! Iniciando reprodução...")
+                
+                # AUTOPLAY: Iniciar reprodução automaticamente após carregar
+                self.debug_log("🎬 Arquivo carregado - iniciando reprodução automática...")
+                self.root.after(500, self.play)  # Aguarda 500ms e inicia o play
+                
             except Exception as e:
+                self.debug_log(f"❌ Erro ao carregar arquivo: {e}")
                 messagebox.showerror("Erro", str(e))
     
     def show_first_frame(self):
@@ -1402,7 +1566,38 @@ class KaraokePlayer:
             self.time_label.config(text=f"00:00 / {time.strftime('%M:%S', time.gmtime(self.duration))}")
         self.root.after(100, self.update_timer)
 
+
+# NO FINAL DO ARQUIVO, modifique a parte principal:
 if __name__ == "__main__":
     root = tk.Tk()
     app = KaraokePlayer(root)
-    root.mainloop()
+    
+    # Configurar protocolo para fechamento da janela
+    root.protocol("WM_DELETE_WINDOW", app.fechar_aplicacao)
+    
+    # Tratar exceções não capturadas
+    def handle_exception(exc_type, exc_value, exc_traceback):
+        app.debug_log(f"❌ EXCEÇÃO NÃO CAPTURADA: {exc_type.__name__}: {exc_value}")
+        app.fechar_aplicacao()
+    
+    import sys
+    sys.excepthook = handle_exception
+    
+    # Tratar Ctrl+C no terminal também
+    import signal
+    def signal_handler(sig, frame):
+        app.debug_log("⚠️ Sinal Ctrl+C recebido")
+        app.fechar_aplicacao()
+    
+    try:
+        signal.signal(signal.SIGINT, signal_handler)
+    except:
+        pass  # Pode não funcionar em todos os sistemas
+    
+    try:
+        root.mainloop()
+    except KeyboardInterrupt:
+        app.fechar_aplicacao()
+    except Exception as e:
+        app.debug_log(f"❌ ERRO NO MAINLOOP: {e}")
+        app.fechar_aplicacao()

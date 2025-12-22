@@ -2,5 +2,5 @@ Pillow
 python-vlc
 imageio-ffmpeg
 PyPDF2
-pyaudio
+sounddevice
 numpy

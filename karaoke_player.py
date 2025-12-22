@@ -13,11 +13,11 @@ from datetime import datetime
 import numpy as np
 
 try:
-    import pyaudio
+    import sounddevice as sd
     AUDIO_DISPONIVEL = True
 except ImportError:
     AUDIO_DISPONIVEL = False
-    print("AVISO: PyAudio não encontrado. Sistema de pontuação desabilitado.")
+    print("AVISO: sounddevice não encontrado. Sistema de pontuação desabilitado.")
 
 class KaraokePlayer:
     def __init__(self, root):
@@ -242,19 +242,13 @@ class KaraokePlayer:
             try:
                 self.pontuacao_ativa = False
                 if hasattr(self, 'mic_stream') and self.mic_stream:
-                    self.mic_stream.stop_stream()
+                    self.mic_stream.stop()
                     self.mic_stream.close()
                 self.debug_log("✅ Sistema de pontuação finalizado")
             except Exception as e:
                 self.debug_log(f"⚠️ Erro ao parar pontuação: {e}")
         
-        # Limpar interface de áudio
-        if hasattr(self, 'audio_interface') and self.audio_interface:
-            try:
-                self.audio_interface.terminate()
-                self.debug_log("✅ Interface de áudio finalizada")
-            except Exception as e:
-                self.debug_log(f"⚠️ Erro ao finalizar áudio: {e}")
+        # sounddevice não precisa de terminate() como PyAudio
         
         # 2. PARAR PLAYER VLC
         if hasattr(self, 'player') and self.player:
@@ -309,42 +303,54 @@ class KaraokePlayer:
     def inicializar_audio_pontuacao(self):
         """Inicializa o sistema de áudio para pontuação"""
         if not AUDIO_DISPONIVEL:
-            self.debug_log("⚠ PyAudio não disponível - Sistema de pontuação desabilitado")
+            self.debug_log("⚠ sounddevice não disponível - Sistema de pontuação desabilitado")
             return
         
         try:
-            self.audio_interface = pyaudio.PyAudio()
-            self.debug_log("✓ Sistema de áudio inicializado para pontuação")
+            # sounddevice não precisa de inicialização de interface
+            self.debug_log("✓ Sistema de áudio inicializado para pontuação (sounddevice)")
         except Exception as e:
             self.debug_log(f"⚠ Erro ao inicializar áudio: {e}")
-            self.audio_interface = None
     
     def iniciar_captura_pontuacao(self):
         """Inicia captura de áudio para pontuação"""
-        if not AUDIO_DISPONIVEL or not self.audio_interface:
+        if not AUDIO_DISPONIVEL:
             return
         
         try:
             # Configurações de áudio
             CHUNK = 2048
-            FORMAT = pyaudio.paInt16
             CHANNELS = 1  # Mono para simplificar análise
             RATE = 22050  # Taxa reduzida para melhor performance
             
-            self.mic_stream = self.audio_interface.open(
-                format=FORMAT,
-                channels=CHANNELS,
-                rate=RATE,
-                input=True,
-                frames_per_buffer=CHUNK
-            )
-            
             self.pontuacao_ativa = True
+            self.pontuacao_exibida = False  # Flag para exibir apenas uma vez
             self.samples_musica = []
             self.samples_microfone = []
             
-            # Thread para capturar microfone
-            threading.Thread(target=self._capturar_microfone, args=(CHUNK,), daemon=True).start()
+            # Callback para captura de microfone
+            def audio_callback(indata, frames, time_info, status):
+                if status:
+                    self.debug_log(f"⚠ Status do áudio: {status}")
+                if self.pontuacao_ativa:
+                    try:
+                        # Calcula RMS do chunk
+                        audio_mono = indata[:, 0] if len(indata.shape) == 2 else indata
+                        rms = np.sqrt(np.mean(audio_mono**2))
+                        self.samples_microfone.append(float(rms))
+                    except Exception as e:
+                        self.debug_log(f"⚠ Erro no callback: {e}")
+            
+            # Abre stream com sounddevice
+            self.mic_stream = sd.InputStream(
+                channels=CHANNELS,
+                samplerate=RATE,
+                blocksize=CHUNK,
+                callback=audio_callback,
+                dtype=np.int16
+            )
+            
+            self.mic_stream.start()
             
             # Thread para capturar áudio do player (simulado via análise de volume)
             threading.Thread(target=self._capturar_player_audio, daemon=True).start()
@@ -360,15 +366,19 @@ class KaraokePlayer:
         
         if self.mic_stream:
             try:
-                self.mic_stream.stop_stream()
+                self.mic_stream.stop()
                 self.mic_stream.close()
             except:
                 pass
             self.mic_stream = None
         
-        # Calcula pontuação
-        if len(self.samples_musica) > 0 and len(self.samples_microfone) > 0:
-            self.calcular_pontuacao()
+        # Calcula pontuação apenas se ainda não foi exibida
+        if not getattr(self, 'pontuacao_exibida', False) and len(self.samples_musica) > 0 and len(self.samples_microfone) > 0:
+            self.pontuacao_exibida = True
+            # Mostra mensagem de aguarde
+            self.root.after(100, self.mostrar_aguarde_pontuacao)
+            # Calcula após pequeno delay
+            self.root.after(500, self.calcular_pontuacao)
         
         self.debug_log("✓ Captura de pontuação finalizada")
     
@@ -409,6 +419,59 @@ class KaraokePlayer:
                     self.debug_log(f"Erro captura player: {e}")
                 break
     
+    def mostrar_aguarde_pontuacao(self):
+        """Exibe janela de aguarde enquanto calcula a pontuação"""
+        # Cria janela de aguarde
+        self.aguarde_win = tk.Toplevel(self.root)
+        self.aguarde_win.title("Processando")
+        self.aguarde_win.configure(bg="#1a1a1a")
+        self.aguarde_win.transient(self.root)
+        self.aguarde_win.resizable(False, False)
+        
+        # Força a janela a ficar sempre no topo
+        self.aguarde_win.attributes('-topmost', True)
+        
+        # Conteúdo
+        tk.Label(
+            self.aguarde_win,
+            text="⏳",
+            bg="#1a1a1a",
+            font=("Arial", 40)
+        ).pack(pady=(20, 10))
+        
+        tk.Label(
+            self.aguarde_win,
+            text="Calculando pontuação...",
+            bg="#1a1a1a",
+            fg="#4CAF50",
+            font=("Arial", 14, "bold")
+        ).pack()
+        
+        tk.Label(
+            self.aguarde_win,
+            text="Aguarde um momento",
+            bg="#1a1a1a",
+            fg="#888",
+            font=("Arial", 10)
+        ).pack(pady=(5, 20))
+        
+        # Atualiza para calcular tamanho
+        self.aguarde_win.update_idletasks()
+        
+        # Centraliza na tela (método mais confiável)
+        win_width = self.aguarde_win.winfo_reqwidth()
+        win_height = self.aguarde_win.winfo_reqheight()
+        screen_width = self.aguarde_win.winfo_screenwidth()
+        screen_height = self.aguarde_win.winfo_screenheight()
+        
+        x = (screen_width - win_width) // 2
+        y = (screen_height - win_height) // 2
+        
+        self.aguarde_win.geometry(f"{win_width}x{win_height}+{x}+{y}")
+        self.aguarde_win.grab_set()
+        
+        self.debug_log(f"⏳ Janela de aguarde exibida em {x},{y} ({win_width}x{win_height})")
+    
     def calcular_pontuacao(self):
         """Calcula pontuação baseada na correlação entre áudio da música e microfone"""
         try:
@@ -440,6 +503,13 @@ class KaraokePlayer:
             self.pontuacao_final = max(0, min(100, pontuacao_base))
             
             self.debug_log(f"🎯 Pontuação calculada: {self.pontuacao_final:.1f}")
+            
+            # Fecha janela de aguarde se existir
+            if hasattr(self, 'aguarde_win') and self.aguarde_win:
+                try:
+                    self.aguarde_win.destroy()
+                except:
+                    pass
             
             # Mostra resultado
             self.root.after(0, self.mostrar_pontuacao)
@@ -477,16 +547,12 @@ class KaraokePlayer:
         # Cria janela de pontuação
         pontuacao_win = tk.Toplevel(self.root)
         pontuacao_win.title("Pontuação Karaoke")
-        pontuacao_win.geometry("400x300")
         pontuacao_win.configure(bg="#1a1a1a")
         pontuacao_win.transient(self.root)
-        pontuacao_win.grab_set()
+        pontuacao_win.resizable(False, False)
         
-        # Centraliza a janela
-        pontuacao_win.update_idletasks()
-        x = (pontuacao_win.winfo_screenwidth() // 2) - (400 // 2)
-        y = (pontuacao_win.winfo_screenheight() // 2) - (300 // 2)
-        pontuacao_win.geometry(f"400x300+{x}+{y}")
+        # Força a janela a ficar sempre no topo
+        pontuacao_win.attributes('-topmost', True)
         
         # Conteúdo
         tk.Label(
@@ -536,9 +602,24 @@ class KaraokePlayer:
             cursor="hand2",
             padx=30,
             pady=10
-        ).pack(pady=20)
+        ).pack(pady=(0, 20))
         
-        self.debug_log(f"📊 Pontuação exibida: {pontos} - {mensagem}")
+        # Atualiza para calcular tamanho
+        pontuacao_win.update_idletasks()
+        
+        # Centraliza na tela (método mais confiável)
+        win_width = pontuacao_win.winfo_reqwidth()
+        win_height = pontuacao_win.winfo_reqheight()
+        screen_width = pontuacao_win.winfo_screenwidth()
+        screen_height = pontuacao_win.winfo_screenheight()
+        
+        x = (screen_width - win_width) // 2
+        y = (screen_height - win_height) // 2
+        
+        pontuacao_win.geometry(f"{win_width}x{win_height}+{x}+{y}")
+        pontuacao_win.grab_set()
+        
+        self.debug_log(f"📊 Pontuação exibida: {pontos} - {mensagem} em {x},{y}")
     
     def debug_log(self, message):
         """Salva mensagem de debug em arquivo"""
@@ -1342,7 +1423,7 @@ class KaraokePlayer:
                 
                 # Verifica se chegou ao fim da música
                 if current_time > 0 and self.duration > 0 and current_time >= (self.duration - 0.5):
-                    if self.pontuacao_ativa:
+                    if self.pontuacao_ativa and not getattr(self, 'pontuacao_exibida', False):
                         self.debug_log("🎵 Música finalizada - calculando pontuação...")
                         self.parar_captura_pontuacao()
                 

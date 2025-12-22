@@ -14,12 +14,12 @@ import sys
 import signal
 
 try:
-    import pyaudio
+    import sounddevice as sd
     import numpy as np
     AUDIO_DISPONIVEL = True
 except ImportError:
     AUDIO_DISPONIVEL = False
-    print("AVISO: PyAudio ou NumPy não encontrados. V.U. meter desabilitado.")
+    print("AVISO: sounddevice ou NumPy não encontrados. V.U. meter desabilitado.")
 
 try:
     from karaoke_evento import ModoEventoWindow
@@ -1452,16 +1452,14 @@ class KaraokePlayer:
     def inicializar_audio(self):
         """Inicializa o sistema de áudio para captura do microfone"""
         if not AUDIO_DISPONIVEL:
-            self.debug_log("⚠ PyAudio não disponível - V.U. meter desabilitado")
-            self.audio_interface = None
+            self.debug_log("⚠ sounddevice não disponível - V.U. meter desabilitado")
             return
         
         try:
-            self.audio_interface = pyaudio.PyAudio()
-            self.debug_log("✓ Sistema de áudio inicializado para V.U. meter")
+            # sounddevice não precisa de inicialização de interface
+            self.debug_log("✓ Sistema de áudio inicializado (sounddevice)")
         except Exception as e:
             self.debug_log(f"⚠ Erro ao inicializar áudio: {e}")
-            self.audio_interface = None
     
     def toggle_vu_meter(self):
         """Liga ou desliga o V.U. meter"""
@@ -1474,57 +1472,49 @@ class KaraokePlayer:
         """Inicia a captura e exibição do V.U. meter"""
         if not AUDIO_DISPONIVEL:
             messagebox.showerror(
-                "Erro de Áudio",
-                "PyAudio não está instalado!\n\n"
-                "Para usar o V.U. meter, instale as dependências:\n"
-                "pip install pyaudio numpy"
-            )
-            return
-        
-        if not self.audio_interface:
-            messagebox.showerror(
-                "Erro de Áudio",
-                "Sistema de áudio não disponível!\n\n"
-                "Certifique-se de que o PyAudio está instalado:\n"
-                "pip install pyaudio"
+                "Erro",
+                "sounddevice não está instalado!\n\n"
+                "Instale com:\n"
+                "pip install sounddevice numpy"
             )
             return
         
         try:
             # Configurações de áudio
             CHUNK = 1024
-            FORMAT = pyaudio.paInt16
             CHANNELS = 2
             RATE = 44100
             
-            # Abre stream de áudio
-            self.audio_stream = self.audio_interface.open(
-                format=FORMAT,
+            self.vu_running = True
+            
+            # Callback para processar áudio
+            def audio_callback(indata, frames, time_info, status):
+                if status:
+                    self.debug_log(f"⚠ Status do áudio: {status}")
+                if self.vu_running:
+                    self._processar_audio_vu_callback(indata.copy())
+            
+            # Abre stream de áudio com sounddevice
+            self.audio_stream = sd.InputStream(
                 channels=CHANNELS,
-                rate=RATE,
-                input=True,
-                frames_per_buffer=CHUNK,
-                stream_callback=None
+                samplerate=RATE,
+                blocksize=CHUNK,
+                callback=audio_callback,
+                dtype=np.int16
             )
             
-            self.vu_running = True
+            self.audio_stream.start()
+            
             self.vu_toggle_btn.config(
                 text="⏹ Parar V.U. Meter",
                 bg="#f44336"
             )
             
-            # Inicia thread de processamento
-            threading.Thread(target=self._processar_audio_vu, args=(CHUNK,), daemon=True).start()
-            
-            self.debug_log("✓ V.U. meter ativado")
+            self.debug_log("✓ V.U. meter ativado (sounddevice)")
             
         except Exception as e:
-            self.debug_log(f"❌ Erro ao iniciar V.U. meter: {e}")
-            messagebox.showerror(
-                "Erro",
-                f"Não foi possível iniciar o V.U. meter:\n\n{e}\n\n"
-                "Verifique se há um microfone conectado."
-            )
+            messagebox.showerror("Erro", f"Erro ao abrir microfone:\n{e}")
+            self.debug_log(f"❌ Erro ao abrir microfone: {e}")
     
     def parar_vu_meter(self):
         """Para a captura do V.U. meter"""
@@ -1550,62 +1540,64 @@ class KaraokePlayer:
         
         self.debug_log("✓ V.U. meter desativado")
     
-    def _processar_audio_vu(self, chunk_size):
-        """Thread que processa o áudio e atualiza o V.U. meter"""
-        while self.vu_running:
-            try:
-                # Lê dados do microfone
-                data = self.audio_stream.read(chunk_size, exception_on_overflow=False)
+    def _processar_audio_vu_callback(self, audio_data):
+        """Callback que processa o áudio do sounddevice e atualiza o V.U. meter"""
+        try:
+            # audio_data já vem como numpy array do sounddevice
+            # Formato: (frames, channels) se estéreo, ou (frames,) se mono
+            if len(audio_data.shape) == 2 and audio_data.shape[1] == 2:
+                # Estéreo: pega cada canal
+                left_channel = audio_data[:, 0]
+                right_channel = audio_data[:, 1]
+            elif len(audio_data.shape) == 1:
+                # Mono: usa mesmo canal para L e R
+                left_channel = audio_data
+                right_channel = audio_data
+            else:
+                return
+            
+            if len(left_channel) > 0:
+                    
+                # Aplica ganho para aumentar sensibilidade
+                gain = self.vu_gain.get()
+                left_channel = left_channel.astype(np.float32) * gain
+                right_channel = right_channel.astype(np.float32) * gain
                 
-                # Converte para numpy array
-                audio_data = np.frombuffer(data, dtype=np.int16)
+                # Limita valores para evitar overflow
+                left_channel = np.clip(left_channel, -32768, 32767)
+                right_channel = np.clip(right_channel, -32768, 32767)
                 
-                # Separa canais (estéreo)
-                if len(audio_data) > 0:
-                    left_channel = audio_data[0::2]
-                    right_channel = audio_data[1::2]
-                    
-                    # Aplica ganho para aumentar sensibilidade
-                    gain = self.vu_gain.get()
-                    left_channel = left_channel.astype(np.float32) * gain
-                    right_channel = right_channel.astype(np.float32) * gain
-                    
-                    # Limita valores para evitar overflow
-                    left_channel = np.clip(left_channel, -32768, 32767)
-                    right_channel = np.clip(right_channel, -32768, 32767)
-                    
-                    # Calcula RMS (Root Mean Square) para cada canal
-                    rms_left = np.sqrt(np.mean(left_channel**2))
-                    rms_right = np.sqrt(np.mean(right_channel**2))
-                    
-                    # Armazena RMS médio para pontuação
-                    rms_avg = (rms_left + rms_right) / 2
-                    if hasattr(self, 'samples_microfone'):
-                        self.samples_microfone.append(float(rms_avg))
-                    
-                    # Converte para dB (escala logarítmica)
-                    # Usa referência menor para voz (10.0 ao invés de 32768.0)
-                    if rms_left > 1:
-                        db_left = 20 * np.log10(rms_left / 32768.0)
-                    else:
-                        db_left = -60
-                    
-                    if rms_right > 1:
-                        db_right = 20 * np.log10(rms_right / 32768.0)
-                    else:
-                        db_right = -60
-                    
-                    # Limita valores
-                    db_left = max(-60, min(0, db_left))
-                    db_right = max(-60, min(0, db_right))
-                    
-                    # Atualiza visual na thread principal
-                    self.root.after(0, self._atualizar_vu_visual, db_left, db_right)
+                # Calcula RMS (Root Mean Square) para cada canal
+                rms_left = np.sqrt(np.mean(left_channel**2))
+                rms_right = np.sqrt(np.mean(right_channel**2))
                 
-            except Exception as e:
-                if self.vu_running:
-                    self.debug_log(f"Erro ao processar áudio: {e}")
-                break
+                # Armazena RMS médio para pontuação
+                rms_avg = (rms_left + rms_right) / 2
+                if hasattr(self, 'samples_microfone'):
+                    self.samples_microfone.append(float(rms_avg))
+                
+                # Converte para dB (escala logarítmica)
+                # Usa referência menor para voz (10.0 ao invés de 32768.0)
+                if rms_left > 1:
+                    db_left = 20 * np.log10(rms_left / 32768.0)
+                else:
+                    db_left = -60
+                
+                if rms_right > 1:
+                    db_right = 20 * np.log10(rms_right / 32768.0)
+                else:
+                    db_right = -60
+                
+                # Limita valores
+                db_left = max(-60, min(0, db_left))
+                db_right = max(-60, min(0, db_right))
+                
+                # Atualiza visual na thread principal
+                self.root.after(0, self._atualizar_vu_visual, db_left, db_right)
+        
+        except Exception as e:
+            if self.vu_running:
+                self.debug_log(f"Erro ao processar áudio: {e}")
     
     def _atualizar_vu_visual(self, db_left, db_right):
         """Atualiza o visual do V.U. meter (chamado na thread principal)"""
@@ -2006,11 +1998,16 @@ class KaraokePlayer:
         musica_label.pack(anchor=tk.W, fill=tk.X, pady=(2, 0))
         musica_label.bind("<Button-1>", selecionar_e_tocar)
         
-        # Informações adicionais (tom, arquivo)
+        # Informações adicionais (tom, arquivo, pontuação)
         info_adicional = []
         
         if item.get('tom_ajuste', 0) != 0:
             info_adicional.append(f"Tom: {item['tom_ajuste']:+d}")
+        
+        # Pontuação do V.U. meter (se já tocou)
+        if item.get('ja_tocou') and item.get('pontuacao_vu', 0) > 0:
+            pontos = item['pontuacao_vu']
+            info_adicional.append(f"⭐ {pontos:.0f} pts")
         
         # Nome do arquivo (código ou nome curto)
         arquivo_nome = os.path.basename(item.get('arquivo_path', ''))
@@ -2431,13 +2428,14 @@ class KaraokePlayer:
         
         db = KaraokeDatabase()
         tempo = self.player.get_time() / 1000.0 if self.player else 0
-        db.marcar_musica_tocada(self.musica_atual_evento['id'], tempo)
-        pontos = db.calcular_pontuacao(self.musica_atual_evento['id'])
+        
+        # Passa a pontuação do V.U. meter (se disponível) para o banco de dados
+        pontuacao_vu = getattr(self, 'pontuacao_final', None)
+        db.marcar_musica_tocada(self.musica_atual_evento['id'], tempo, pontuacao_vu)
         
         self.carregar_playlist_evento(self.evento_id_atual)
         
-        messagebox.showinfo("Pontuação", f"🎤 {self.musica_atual_evento['participante_nome']}\n\n⭐ {pontos} pontos!\n\nTempo: {tempo:.1f}s")
-        
+        # Verifica se há próxima música
         proxima = db.obter_proxima_musica(self.evento_id_atual)
         if proxima:
             if messagebox.askyesno("Próxima", f"🎤 {proxima['participante_nome']}\n🎵 {os.path.basename(proxima['arquivo_path'])}\n\nIniciar?"):
@@ -2685,12 +2683,14 @@ class KaraokePlayer:
             if AUDIO_DISPONIVEL and not self.vu_running:
                 self.samples_microfone = []
                 self.tempo_inicio_musica = time.time()
+                self.pontuacao_exibida = False  # Flag para controlar exibição única
                 self.root.after(500, self.iniciar_vu_meter)
                 self.debug_log("🎤 V.U. meter ativado automaticamente")
             elif self.vu_running:
                 # Se já estava ativo, apenas reseta amostras
                 self.samples_microfone = []
                 self.tempo_inicio_musica = time.time()
+                self.pontuacao_exibida = False  # Flag para controlar exibição única
                 self.debug_log("🎤 Amostras resetadas para nova música")
             
             self.status_label.config(text="▶ Tocando")
@@ -2707,17 +2707,12 @@ class KaraokePlayer:
             self.debug_log("⏸ Pause")
     
     def stop(self):
-        """Para reprodução do vídeo e calcula pontuação"""
+        """Para reprodução do vídeo"""
         if self.player:
             self.player.stop()
             self.is_playing = False
             self.status_label.config(text="⏹ Parado")
             self.debug_log("⏹ Stop")
-            
-            # Calcula e exibe pontuação se houver amostras suficientes
-            if AUDIO_DISPONIVEL and len(self.samples_microfone) > 10:
-                self.root.after(300, self.calcular_pontuacao)
-                self.debug_log(f"📊 Calculando pontuação com {len(self.samples_microfone)} amostras")
     
     def on_slider_press(self):
         """Chamado quando usuário clica no slider"""
@@ -2768,6 +2763,62 @@ class KaraokePlayer:
         except Exception as e:
             self.debug_log(f"⚠️ Erro ao fazer seek: {e}")
     
+    def mostrar_aguarde_pontuacao(self):
+        """Exibe janela de aguarde enquanto calcula a pontuação"""
+        # Determina janela pai (preferência para video_window)
+        parent = self.video_window if (hasattr(self, 'video_window') and self.video_window and self.video_window.winfo_exists()) else self.root
+        
+        # Cria janela de aguarde
+        self.aguarde_win = tk.Toplevel(parent)
+        self.aguarde_win.title("Processando")
+        self.aguarde_win.configure(bg="#1a1a1a")
+        self.aguarde_win.transient(parent)
+        self.aguarde_win.resizable(False, False)
+        
+        # Força a janela a ficar sempre no topo
+        self.aguarde_win.attributes('-topmost', True)
+        
+        # Conteúdo
+        tk.Label(
+            self.aguarde_win,
+            text="⏳",
+            bg="#1a1a1a",
+            font=("Arial", 40)
+        ).pack(pady=(20, 10))
+        
+        tk.Label(
+            self.aguarde_win,
+            text="Calculando pontuação...",
+            bg="#1a1a1a",
+            fg="#4CAF50",
+            font=("Arial", 14, "bold")
+        ).pack()
+        
+        tk.Label(
+            self.aguarde_win,
+            text="Aguarde um momento",
+            bg="#1a1a1a",
+            fg="#888",
+            font=("Arial", 10)
+        ).pack(pady=(5, 20))
+        
+        # Atualiza para calcular tamanho
+        self.aguarde_win.update_idletasks()
+        
+        # Centraliza na tela (método mais confiável)
+        win_width = self.aguarde_win.winfo_reqwidth()
+        win_height = self.aguarde_win.winfo_reqheight()
+        screen_width = self.aguarde_win.winfo_screenwidth()
+        screen_height = self.aguarde_win.winfo_screenheight()
+        
+        x = (screen_width - win_width) // 2
+        y = (screen_height - win_height) // 2
+        
+        self.aguarde_win.geometry(f"{win_width}x{win_height}+{x}+{y}")
+        self.aguarde_win.grab_set()
+        
+        self.debug_log(f"⏳ Janela de aguarde exibida em {x},{y} ({win_width}x{win_height})")
+    
     def calcular_pontuacao(self):
         """Calcula pontuação baseada na atividade do microfone"""
         if not AUDIO_DISPONIVEL:
@@ -2804,6 +2855,13 @@ class KaraokePlayer:
             self.debug_log(f"🎯 Pontuação calculada: {self.pontuacao_final:.1f}")
             self.debug_log(f"   Consistência: {consistencia:.2f}, Energia: {energia_media:.2f}, Atividade: {atividade:.2f}")
             
+            # Fecha janela de aguarde se existir
+            if hasattr(self, 'aguarde_win') and self.aguarde_win:
+                try:
+                    self.aguarde_win.destroy()
+                except:
+                    pass
+            
             # Mostra resultado
             self.root.after(0, self.mostrar_pontuacao)
             
@@ -2837,19 +2895,18 @@ class KaraokePlayer:
             mensagem = "CONTINUE PRATICANDO!"
             cor = "#f44336"
         
-        # Cria janela de pontuação
-        pontuacao_win = tk.Toplevel(self.root)
-        pontuacao_win.title("Pontuação Karaoke")
-        pontuacao_win.geometry("400x300")
-        pontuacao_win.configure(bg="#1a1a1a")
-        pontuacao_win.transient(self.root)
-        pontuacao_win.grab_set()
+        # Determina janela pai (preferência para video_window)
+        parent = self.video_window if (hasattr(self, 'video_window') and self.video_window and self.video_window.winfo_exists()) else self.root
         
-        # Centraliza a janela
-        pontuacao_win.update_idletasks()
-        x = (pontuacao_win.winfo_screenwidth() // 2) - (400 // 2)
-        y = (pontuacao_win.winfo_screenheight() // 2) - (300 // 2)
-        pontuacao_win.geometry(f"400x300+{x}+{y}")
+        # Cria janela de pontuação
+        pontuacao_win = tk.Toplevel(parent)
+        pontuacao_win.title("Pontuação Karaoke")
+        pontuacao_win.configure(bg="#1a1a1a")
+        pontuacao_win.transient(parent)
+        pontuacao_win.resizable(False, False)
+        
+        # Força a janela a ficar sempre no topo
+        pontuacao_win.attributes('-topmost', True)
         
         # Conteúdo
         tk.Label(
@@ -2899,7 +2956,24 @@ class KaraokePlayer:
             cursor="hand2",
             padx=30,
             pady=10
-        ).pack(pady=20)
+        ).pack(pady=(0, 20))
+        
+        # Atualiza para calcular tamanho
+        pontuacao_win.update_idletasks()
+        
+        # Centraliza na tela (método mais confiável)
+        win_width = pontuacao_win.winfo_reqwidth()
+        win_height = pontuacao_win.winfo_reqheight()
+        screen_width = pontuacao_win.winfo_screenwidth()
+        screen_height = pontuacao_win.winfo_screenheight()
+        
+        x = (screen_width - win_width) // 2
+        y = (screen_height - win_height) // 2
+        
+        pontuacao_win.geometry(f"{win_width}x{win_height}+{x}+{y}")
+        pontuacao_win.grab_set()
+        
+        self.debug_log(f"📊 Pontuação exibida: {pontos} - {mensagem} em {x},{y}")
         
         self.debug_log(f"📊 Pontuação exibida: {pontos} - {mensagem}")
     
@@ -2916,6 +2990,21 @@ class KaraokePlayer:
                 if hasattr(self, 'seek_slider') and self.duration > 0 and not self.is_seeking:
                     progress = (current_time / self.duration) * 100.0
                     self.seek_slider.set(progress)
+                
+                # Detectar fim da música (faltando menos de 0.5 segundo)
+                if self.duration > 0 and (self.duration - current_time) < 0.5:
+                    # Calcula pontuação apenas uma vez por música
+                    if AUDIO_DISPONIVEL and len(self.samples_microfone) > 10 and not getattr(self, 'pontuacao_exibida', False):
+                        self.pontuacao_exibida = True
+                        self.debug_log(f"🎵 Música terminou - Calculando pontuação com {len(self.samples_microfone)} amostras")
+                        # Mostra mensagem de aguarde
+                        self.root.after(100, self.mostrar_aguarde_pontuacao)
+                        # Calcula pontuação após pequeno delay
+                        self.root.after(500, self.calcular_pontuacao)
+                        
+                        # Se estiver no modo evento, agenda finalização após exibir pontuação
+                        if self.modo_evento_ativo and MODO_EVENTO_DISPONIVEL:
+                            self.root.after(2000, self.finalizar_musica_evento)
             except:
                 pass
         elif self.video_file and hasattr(self, 'time_label'):

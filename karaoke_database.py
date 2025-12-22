@@ -244,6 +244,7 @@ class KaraokeDatabase:
                 duracao_segundos REAL,
                 tempo_cantado REAL DEFAULT 0,
                 musica_nome TEXT,
+                pontuacao_vu REAL DEFAULT 0,
                 FOREIGN KEY (evento_id) REFERENCES eventos(id),
                 FOREIGN KEY (participante_id) REFERENCES participantes(id)
             )
@@ -278,6 +279,9 @@ class KaraokeDatabase:
             
             if 'musica_nome' not in columns:
                 cursor.execute("ALTER TABLE playlist ADD COLUMN musica_nome TEXT")
+            
+            if 'pontuacao_vu' not in columns:
+                cursor.execute("ALTER TABLE playlist ADD COLUMN pontuacao_vu REAL DEFAULT 0")
                 conn.commit()
                 print("✅ Migration: Coluna 'musica_nome' adicionada à tabela playlist")
             
@@ -448,7 +452,8 @@ class KaraokeDatabase:
         cursor.execute("""
             SELECT p.id, p.arquivo_path, p.tom_ajuste, p.ordem, p.ja_tocou,
                    p.duracao_segundos, p.tempo_cantado,
-                   part.nome, part.avatar_path, part.id, p.evento_id, p.musica_nome
+                   part.nome, part.avatar_path, part.id, p.evento_id, p.musica_nome,
+                   p.pontuacao_vu
             FROM playlist p
             JOIN participantes part ON p.participante_id = part.id
             WHERE p.evento_id = ?
@@ -469,7 +474,8 @@ class KaraokeDatabase:
                 'participante_avatar': row[8],
                 'participante_id': row[9],
                 'evento_id': row[10],
-                'musica_nome': row[11]
+                'musica_nome': row[11],
+                'pontuacao_vu': row[12] if row[12] is not None else 0
             })
         
         conn.close()
@@ -506,67 +512,40 @@ class KaraokeDatabase:
             }
         return None
     
-    def marcar_musica_tocada(self, musica_id, tempo_cantado):
-        """Marca uma música como tocada e registra o tempo cantado"""
+    def marcar_musica_tocada(self, musica_id, tempo_cantado, pontuacao_vu=None):
+        """Marca uma música como tocada, registra o tempo cantado e a pontuação do V.U. meter"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        cursor.execute("""
-            UPDATE playlist
-            SET ja_tocou = 1, tempo_cantado = ?
-            WHERE id = ?
-        """, (tempo_cantado, musica_id))
-        
-        conn.commit()
-        conn.close()
-    
-    def calcular_pontuacao(self, musica_id):
-        """Calcula a pontuação baseada no tempo cantado"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT tempo_cantado, duracao_segundos, participante_id
-            FROM playlist
-            WHERE id = ?
-        """, (musica_id,))
-        
-        row = cursor.fetchone()
-        
-        if row:
-            tempo_cantado = row[0]
-            duracao_total = row[1]
-            participante_id = row[2]
-            
-            # Pontuação: 100 pontos base se cantar pelo menos 80% da música
-            if duracao_total > 0:
-                percentual = (tempo_cantado / duracao_total) * 100
-                
-                if percentual >= 80:
-                    pontos = 100
-                elif percentual >= 60:
-                    pontos = 80
-                elif percentual >= 40:
-                    pontos = 60
-                else:
-                    pontos = max(0, int(percentual))
-            else:
-                pontos = 100  # Se não tiver duração registrada
+        if pontuacao_vu is not None:
+            cursor.execute("""
+                UPDATE playlist
+                SET ja_tocou = 1, tempo_cantado = ?, pontuacao_vu = ?
+                WHERE id = ?
+            """, (tempo_cantado, pontuacao_vu, musica_id))
             
             # Atualizar pontuação do participante
+            cursor.execute("""
+                SELECT participante_id FROM playlist WHERE id = ?
+            """, (musica_id,))
+            participante_id = cursor.fetchone()[0]
+            
             cursor.execute("""
                 UPDATE participantes
                 SET pontuacao = pontuacao + ?
                 WHERE id = ?
-            """, (pontos, participante_id))
-            
-            conn.commit()
-            conn.close()
-            
-            return pontos
+            """, (pontuacao_vu, participante_id))
+        else:
+            cursor.execute("""
+                UPDATE playlist
+                SET ja_tocou = 1, tempo_cantado = ?
+                WHERE id = ?
+            """, (tempo_cantado, musica_id))
         
+        conn.commit()
         conn.close()
-        return 0
+    
+
     
     def obter_ranking(self, evento_id):
         """Obtém o ranking final dos participantes com avatar"""

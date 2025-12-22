@@ -9,8 +9,17 @@ import os
 import subprocess
 import tempfile
 import json
-
 from datetime import datetime
+import sys
+import signal
+
+try:
+    import pyaudio
+    import numpy as np
+    AUDIO_DISPONIVEL = True
+except ImportError:
+    AUDIO_DISPONIVEL = False
+    print("AVISO: PyAudio ou NumPy não encontrados. V.U. meter desabilitado.")
 
 try:
     from karaoke_evento import ModoEventoWindow
@@ -19,6 +28,54 @@ try:
 except ImportError:
     MODO_EVENTO_DISPONIVEL = False
     print("AVISO: Módulos de evento não encontrados. Modo Evento desabilitado.")
+
+# Funções auxiliares para verificar disponibilidade de ferramentas
+def verificar_ffmpeg_instalado():
+    """Verifica se ffmpeg e ffprobe estão disponíveis no sistema"""
+    try:
+        subprocess.run(['ffmpeg', '-version'], 
+                      capture_output=True, 
+                      check=True,
+                      creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+
+def verificar_ffprobe_instalado():
+    """Verifica se ffprobe está disponível no sistema"""
+    try:
+        subprocess.run(['ffprobe', '-version'], 
+                      capture_output=True, 
+                      check=True,
+                      creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+
+def mostrar_erro_ffmpeg():
+    """Mostra mensagem de erro sobre ffmpeg não encontrado"""
+    mensagem = """❌ FFMPEG NÃO ENCONTRADO
+
+O programa precisa do FFmpeg instalado para funcionar.
+
+📥 COMO INSTALAR:
+
+Windows:
+1. Baixe: https://www.gyan.dev/ffmpeg/builds/
+2. Extraia o arquivo ZIP
+3. Adicione a pasta 'bin' ao PATH do sistema
+   Ou copie ffmpeg.exe e ffprobe.exe para:
+   C:\\Windows\\System32\\
+
+Ou use Chocolatey:
+   choco install ffmpeg
+
+Ou use Winget:
+   winget install ffmpeg
+
+Após instalar, reinicie o programa."""
+    
+    messagebox.showerror("FFmpeg Não Encontrado", mensagem)
 
 class KaraokePlayer:
     
@@ -47,67 +104,40 @@ class KaraokePlayer:
             arquivo_encontrado = self.buscar_arquivo_mp4(codigo)
             
             if arquivo_encontrado:
-                resposta = messagebox.askyesno(
-                    "Música Encontrada",
-                    f"🎤 Cantor: {cantor}\n🎵 Música: {musica}\n🔢 Código: {codigo}\n\n"
-                    f"📁 Arquivo: {os.path.basename(arquivo_encontrado)}\n\n"
-                    "Deseja carregar e iniciar esta música?"  # TEXTO ALTERADO
-                )
-                
-                if resposta:
-                    # Carrega o arquivo
-                    self.video_file = arquivo_encontrado
-                    self.processed_file = arquivo_encontrado
-                    self.pitch_shift = 0
-                    self.pitch_label.config(text="0")
-                    # Atualiza o pitch_var do Spinbox também, se existir
-                    if hasattr(self, 'pitch_var'):
-                        self.pitch_var.set(0)
+                # Se modo evento está ativo, adiciona à playlist com seleção de participante
+                if self.modo_evento_ativo and MODO_EVENTO_DISPONIVEL:
+                    if messagebox.askyesno(
+                        "Adicionar à Playlist",
+                        f"🎤 Cantor: {cantor}\n🎵 Música: {musica}\n🔢 Código: {codigo}\n\n"
+                        f"📁 Arquivo: {os.path.basename(arquivo_encontrado)}\n\n"
+                        "Deseja adicionar esta música à playlist do evento?"
+                    ):
+                        self.adicionar_musica_evento(arquivo_encontrado, cantor, musica, codigo)
+                        busca_win.destroy()
+                else:
+                    # Modo normal: pergunta se deseja adicionar à playlist
+                    resposta = messagebox.askyesno(
+                        "Música Encontrada",
+                        f"🎤 Cantor: {cantor}\n🎵 Música: {musica}\n🔢 Código: {codigo}\n\n"
+                        f"📁 Arquivo: {os.path.basename(arquivo_encontrado)}\n\n"
+                        "Deseja adicionar à playlist?"
+                    )
                     
-                    self.file_label.config(text=f"{codigo} - {musica}")
-                    
-                    # Obtém informações do vídeo
-                    try:
-                        result = subprocess.run([
-                            'ffprobe', '-v', 'quiet', '-print_format', 'json',
-                            '-show_format', '-show_streams', arquivo_encontrado
-                        ], capture_output=True, text=True, check=True)
-                        
-                        info = json.loads(result.stdout)
-                        for stream in info['streams']:
-                            if stream['codec_type'] == 'video':
-                                self.fps = eval(stream.get('r_frame_rate', '30/1'))
-                                self.width = stream['width']
-                                self.height = stream['height']
-                                break
-                        self.duration = float(info['format']['duration'])
-                    except:
-                        pass
-                    
-                    self.show_first_frame()
-                    self.status_label.config(text=f"✓ {musica} carregada! Iniciando...")
-                    busca_win.destroy()
-                    
-                    # Adiciona à playlist do modo normal COM NOME DA MÚSICA
-                    if not self.modo_evento_ativo:
-                        self.playlist_items.append({
-                            'arquivo_path': arquivo_encontrado,
-                            'participante_nome': cantor,
-                            'musica_nome': musica,
-                            'tom_ajuste': 0,
-                            'ja_tocou': False,
-                            'ordem': len(self.playlist_items) + 1
-                        })
-                        self.atualizar_playlist_visual()
-                    
-                    # AUTOPLAY: Inicia reprodução automaticamente
-                    self.debug_log(f"🎬 Música do catálogo carregada - iniciando reprodução automática...")
-                    self.root.after(500, self.play)
+                    if resposta:
+                        # Adiciona à playlist simples (sem evento)
+                        self.adicionar_musica_playlist_simples(arquivo_encontrado, cantor, musica, codigo)
+                        busca_win.destroy()
             else:
                 messagebox.showerror(
-                    "Arquivo não encontrado",
-                    f"Não foi possível encontrar o arquivo para o código: {codigo}\n\n"
-                    f"Procurando por: '{codigo}.mp4' em C:\\temp\\musicas"
+                    "Arquivo Não Encontrado",
+                    f"❌ Arquivo não encontrado!\n\n"
+                    f"🎤 Cantor: {cantor}\n"
+                    f"🎵 Música: {musica}\n"
+                    f"🔢 Código: {codigo}\n\n"
+                    f"📁 Procurando por: '{codigo}.mp4'\n"
+                    f"📂 Pasta: {self.music_folder}\n\n"
+                    "Verifique se o arquivo existe na pasta de músicas.",
+                    parent=busca_win
                 )
 
     def __init__(self, root):
@@ -116,6 +146,7 @@ class KaraokePlayer:
         self.root.geometry("1200x780")
         self.root.configure(bg="#1a1a1a")
         self.force_quit = False  # Adicione esta flag
+        self.music_folder = r"D:\\"
 
         # LOG INICIAL
         self.debug_log("=" * 60)
@@ -123,21 +154,39 @@ class KaraokePlayer:
         self.debug_log(f"Data/Hora: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         self.debug_log("=" * 60)
         
-        # VLC instances
-        self.vlc_instance = vlc.Instance('--no-xlib')
-        self.player = self.vlc_instance.media_player_new()
+        # VERIFICAR SE FFMPEG ESTÁ INSTALADO
+        if not verificar_ffprobe_instalado():
+            self.debug_log("❌ ERRO: FFprobe não encontrado!")
+            mostrar_erro_ffmpeg()
+            self.root.destroy()
+            return
+        
+        if not verificar_ffmpeg_instalado():
+            self.debug_log("❌ ERRO: FFmpeg não encontrado!")
+            mostrar_erro_ffmpeg()
+            self.root.destroy()
+            return
+        
+        self.debug_log("✓ FFmpeg e FFprobe encontrados")
         
         self.video_file = None
         self.processed_file = None
         self.pitch_shift = 0
+        self.playback_speed = 1.0  # Velocidade de reprodução (1.0 = normal)
         self.is_playing = False
         self.duration = 0
         self.fps = 30
         self.width = 0
         self.height = 0
-        self.video_thread = None
-        self.frame_process = None
         self.processing_pitch = False
+        
+        # VLC instances
+        self.vlc_instance = vlc.Instance('--no-xlib', '--no-video-title-show')
+        self.player = self.vlc_instance.media_player_new()
+        
+        # Janela secundária para vídeo (segundo monitor)
+        self.video_window = None
+        self.video_frame_secondary = None
         
         # Modo Evento
         self.modo_evento_ativo = False
@@ -146,15 +195,76 @@ class KaraokePlayer:
         self.playlist_items = []
         self.selected_playlist_index = None
         
+        # Sistema de áudio para V.U. meter e pontuação
+        self.audio_stream = None
+        self.audio_interface = None
+        self.vu_running = False
+        self.vu_level = 0
+        self.samples_microfone = []  # Amostras do microfone para pontuação
+        self.pontuacao_final = 0
+        self.tempo_inicio_musica = 0  # Tempo de início para sincronização
+        self.inicializar_audio()
+        
         self.setup_ui()
+        self.criar_janela_video_secundaria()
         self.update_timer()
+    
+
  
 
 
         
+    def criar_janela_video_secundaria(self):
+        """Cria janela secundária para exibir vídeo (arrastável para segundo monitor)"""
+        try:
+            self.video_window = tk.Toplevel(self.root)
+            self.video_window.title("Karaoke Player - Vídeo")
+            self.video_window.configure(bg="black")
+            
+            # Cria janela em tamanho fixo que pode ser arrastada
+            width = 800
+            height = 600
+            
+            # Tenta posicionar próximo ao segundo monitor
+            screen_width = self.root.winfo_screenwidth()
+            x = screen_width - width - 50  # Posiciona na borda direita
+            y = 50
+            
+            self.video_window.geometry(f"{width}x{height}+{x}+{y}")
+            self.debug_log(f"📺 Janela de vídeo criada: {width}x{height}+{x}+{y}")
+            
+            # Frame para o vídeo VLC
+            self.video_frame_secondary = tk.Frame(self.video_window, bg="black")
+            self.video_frame_secondary.pack(fill=tk.BOTH, expand=True)
+            
+            # Protocolo de fechamento
+            self.video_window.protocol("WM_DELETE_WINDOW", lambda: None)  # Ignora fechar pela janela
+            
+            # Adiciona texto de instrução
+            label = tk.Label(
+                self.video_frame_secondary,
+                text="🎤 Aguardando vídeo...\n\nCarregue um arquivo MP4 no painel de controle\n\n💡 Arraste esta janela para o segundo monitor",
+                font=("Arial", 16),
+                bg="black",
+                fg="white"
+            )
+            label.place(relx=0.5, rely=0.5, anchor="center")
+            
+            self.debug_log("✅ Janela secundária de vídeo criada")
+            
+        except Exception as e:
+            self.debug_log(f"⚠️ Erro ao criar janela secundária: {e}")
+            self.video_window = None
+    
     def fechar_aplicacao(self, confirmar=True):
-
-        """Fecha a aplicação com opção de confirmação"""
+        """Fecha a aplicação com opção de confirmação e limpeza de recursos"""
+        
+        # Verificar se já está fechando
+        if self.force_quit:
+            self.debug_log("⚠️ Fechamento já em andamento, ignorando...")
+            return
+        
+        # Confirmar com o usuário (se solicitado)
         if confirmar:
             from tkinter import messagebox
             resposta = messagebox.askyesno(
@@ -165,12 +275,10 @@ class KaraokePlayer:
                 "✓ Modo evento será salvo (se ativo)"
             )
             if not resposta:
+                self.debug_log("ℹ️ Usuário cancelou o fechamento")
                 return
-                
-        """Fecha a aplicação de forma limpa, liberando todos os recursos"""
-        if self.force_quit:
-            return
-            
+        
+        # Marcar como fechando
         self.force_quit = True
         self.debug_log("=" * 60)
         self.debug_log("🛑 FECHANDO KARAOKE PLAYER...")
@@ -186,6 +294,24 @@ class KaraokePlayer:
         # Sinalizar para threads pararem
         self.is_playing = False
         self.progress_animation_running = False
+        
+        # Parar player VLC
+        if hasattr(self, 'player') and self.player:
+            try:
+                self.debug_log("⏹️ Parando player VLC...")
+                self.player.stop()
+                self.debug_log("✅ Player VLC parado")
+            except Exception as e:
+                self.debug_log(f"⚠️ Erro ao parar VLC: {e}")
+        
+        # Fechar janela secundária de vídeo
+        if hasattr(self, 'video_window') and self.video_window:
+            try:
+                self.debug_log("🖼️ Fechando janela de vídeo...")
+                self.video_window.destroy()
+                self.debug_log("✅ Janela de vídeo fechada")
+            except Exception as e:
+                self.debug_log(f"⚠️ Erro ao fechar janela de vídeo: {e}")
         
         # Se estiver em modo evento, tentar salvar estado
         if hasattr(self, 'modo_evento_ativo') and self.modo_evento_ativo:
@@ -211,17 +337,6 @@ class KaraokePlayer:
                 self.debug_log("✅ Player VLC parado")
             except Exception as e:
                 self.debug_log(f"⚠️ Erro ao parar VLC: {e}")
-        
-        # Parar processo ffmpeg de vídeo
-        if hasattr(self, 'frame_process') and self.frame_process:
-            try:
-                self.debug_log("🛑 Finalizando processo ffmpeg de vídeo...")
-                self.frame_process.kill()
-                if hasattr(self.frame_process, 'wait'):
-                    self.frame_process.wait(timeout=1)
-                self.debug_log("✅ Processo ffmpeg finalizado")
-            except Exception as e:
-                self.debug_log(f"⚠️ Erro ao parar ffmpeg: {e}")
         
         # Parar qualquer processamento de pitch em andamento
         if hasattr(self, 'processing_pitch') and self.processing_pitch:
@@ -250,6 +365,21 @@ class KaraokePlayer:
             self.debug_log("✅ Janelas filhas fechadas")
         except:
             pass
+        
+        # Parar V.U. meter e limpar recursos de áudio
+        if hasattr(self, 'vu_running') and self.vu_running:
+            try:
+                self.parar_vu_meter()
+                self.debug_log("✅ V.U. meter finalizado")
+            except:
+                pass
+        
+        if hasattr(self, 'audio_interface') and self.audio_interface:
+            try:
+                self.audio_interface.terminate()
+                self.debug_log("✅ Interface de áudio finalizada")
+            except:
+                pass
         
         self.debug_log("=" * 60)
         self.debug_log("✅ KARAOKE PLAYER FINALIZADO COM SUCESSO")
@@ -361,14 +491,85 @@ class KaraokePlayer:
             arquivo_encontrado = self.buscar_arquivo_mp4(codigo)
             
             if arquivo_encontrado:
-                resposta = messagebox.askyesno(
-                    "Música Encontrada",
-                    f"🎤 Cantor: {cantor}\n🎵 Música: {musica}\n🔢 Código: {codigo}\n\n"
-                    f"📁 Arquivo: {os.path.basename(arquivo_encontrado)}\n\n"
-                    "Deseja carregar esta música?"
-                )
+                # Diálogo único com formulário completo
+                nome_dialog = tk.Toplevel(busca_win)
+                nome_dialog.title("Adicionar à Playlist")
+                nome_dialog.geometry("450x280")
+                nome_dialog.configure(bg="#222")
+                nome_dialog.transient(busca_win)
+                nome_dialog.grab_set()
                 
-                if resposta:
+                # Centralizar na tela
+                nome_dialog.update_idletasks()
+                x = (nome_dialog.winfo_screenwidth() // 2) - (450 // 2)
+                y = (nome_dialog.winfo_screenheight() // 2) - (280 // 2)
+                nome_dialog.geometry(f"450x280+{x}+{y}")
+                
+                # Título
+                tk.Label(
+                    nome_dialog,
+                    text="🎵 Adicionar Música à Playlist",
+                    bg="#222",
+                    fg="#4CAF50",
+                    font=("Arial", 14, "bold")
+                ).pack(pady=(15, 10))
+                
+                # Frame de informações da música
+                info_frame = tk.Frame(nome_dialog, bg="#333", relief=tk.RIDGE, bd=2)
+                info_frame.pack(fill=tk.X, padx=20, pady=5)
+                
+                tk.Label(
+                    info_frame,
+                    text=f"🎤 Cantor: {cantor}",
+                    bg="#333",
+                    fg="white",
+                    font=("Arial", 10),
+                    anchor=tk.W
+                ).pack(fill=tk.X, padx=10, pady=2)
+                
+                tk.Label(
+                    info_frame,
+                    text=f"🎵 Música: {musica}",
+                    bg="#333",
+                    fg="white",
+                    font=("Arial", 10),
+                    anchor=tk.W
+                ).pack(fill=tk.X, padx=10, pady=2)
+                
+                tk.Label(
+                    info_frame,
+                    text=f"🔢 Código: {codigo}",
+                    bg="#333",
+                    fg="white",
+                    font=("Arial", 10),
+                    anchor=tk.W
+                ).pack(fill=tk.X, padx=10, pady=2)
+                
+                # Campo de nome do participante
+                tk.Label(
+                    nome_dialog,
+                    text="Nome do Participante (opcional):",
+                    bg="#222",
+                    fg="#BBB",
+                    font=("Arial", 10, "italic")
+                ).pack(pady=(15, 5))
+                
+                nome_var = tk.StringVar(value=cantor)
+                nome_entry = tk.Entry(
+                    nome_dialog,
+                    textvariable=nome_var,
+                    font=("Arial", 12),
+                    width=35
+                )
+                nome_entry.pack(pady=5)
+                nome_entry.focus_set()
+                nome_entry.select_range(0, tk.END)
+                
+                def confirmar():
+                    nome = nome_var.get().strip()
+                    if not nome:
+                        nome = cantor  # Usa o nome do cantor se vazio
+                    
                     # Carrega o arquivo
                     self.video_file = arquivo_encontrado
                     self.processed_file = arquivo_encontrado
@@ -377,24 +578,67 @@ class KaraokePlayer:
                     self.file_label.config(text=f"{codigo} - {musica}")
                     self.show_first_frame()
                     self.status_label.config(text=f"✅ Música carregada: {musica}")
-                    busca_win.destroy()
                     
-                    # Adiciona à playlist do modo normal COM NOME DA MÚSICA
+                    # Adiciona à playlist do modo normal
                     if not self.modo_evento_ativo:
                         self.playlist_items.append({
                             'arquivo_path': arquivo_encontrado,
-                            'participante_nome': cantor,  # Nome do cantor
-                            'musica_nome': musica,  # NOME DA MÚSICA
+                            'participante_nome': nome,
+                            'musica_nome': musica,
                             'tom_ajuste': 0,
                             'ja_tocou': False,
                             'ordem': len(self.playlist_items) + 1
                         })
                         self.atualizar_playlist_visual()
+                    
+                    nome_dialog.destroy()
+                    busca_win.destroy()
+                
+                def cancelar():
+                    nome_dialog.destroy()
+                
+                # Botões
+                btn_frame = tk.Frame(nome_dialog, bg="#222")
+                btn_frame.pack(pady=15)
+                
+                tk.Button(
+                    btn_frame,
+                    text="✓ Adicionar à Playlist",
+                    command=confirmar,
+                    bg="#4CAF50",
+                    fg="white",
+                    font=("Arial", 10, "bold"),
+                    cursor="hand2",
+                    width=18,
+                    height=2
+                ).pack(side=tk.LEFT, padx=5)
+                
+                tk.Button(
+                    btn_frame,
+                    text="✗ Cancelar",
+                    command=cancelar,
+                    bg="#f44336",
+                    fg="white",
+                    font=("Arial", 10, "bold"),
+                    cursor="hand2",
+                    width=12,
+                    height=2
+                ).pack(side=tk.LEFT, padx=5)
+                
+                nome_entry.bind("<Return>", lambda e: confirmar())
+                nome_dialog.bind("<Escape>", lambda e: cancelar())
+                    
             else:
-                messagebox.showerror( +
-                    "Arquivo não encontrado",
-                    f"Não foi possível encontrar o arquivo para o código: {codigo}\n\n"
-                    f"Procurando por: '{codigo}.mp4' em C:\\temp\\musicas"
+                messagebox.showerror(
+                    "Arquivo Não Encontrado",
+                    f"❌ Arquivo não encontrado!\n\n"
+                    f"🎤 Cantor: {cantor}\n"
+                    f"🎵 Música: {musica}\n"
+                    f"🔢 Código: {codigo}\n\n"
+                    f"📁 Procurando por: '{codigo}.mp4'\n"
+                    f"📂 Pasta: {self.music_folder}\n\n"
+                    "Verifique se o arquivo existe na pasta de músicas.",
+                    parent=busca_win
                 )
 
         # Botão para carregar música selecionada
@@ -431,8 +675,8 @@ class KaraokePlayer:
         buscar()
             
     def buscar_arquivo_mp4(self, codigo):
-        """Busca arquivo MP4 na pasta C:\\temp\\musicas e subpastas"""
-        base_path = r"C:\\temp\\musicas"
+        """Busca arquivo MP4 na pasta de músicas selecionada e subpastas"""
+        base_path = self.music_folder
         
         # Converte para string e completa com zeros à esquerda até ter 5 dígitos
         codigo_str = str(codigo).strip()
@@ -448,7 +692,7 @@ class KaraokePlayer:
         if not os.path.exists(base_path):
             messagebox.showwarning(
                 "Pasta não encontrada",
-                f"A pasta C:\\temp\\musicas não foi encontrada.\nVerifique se ela existe."
+                f"A pasta {base_path} não foi encontrada.\nVerifique se ela existe."
             )
             return None
             
@@ -509,30 +753,63 @@ class KaraokePlayer:
         )
         self.time_label.pack()
 
-        # Progresso (personalizado, sempre visível)
-        self.progress_frame = tk.Frame(left_frame, bg="#232323", bd=1, relief=tk.SUNKEN)
-        self.progress_frame.pack(fill=tk.X, padx=5, pady=(6, 10))
+        # Seletor de pasta de músicas e progresso na mesma linha
+        pasta_progress_frame = tk.Frame(left_frame, bg="#1a1a1a")
+        pasta_progress_frame.pack(fill=tk.X, padx=5, pady=(0, 8))
+        
+        # Lado esquerdo: Pasta de músicas
+        pasta_frame = tk.Frame(pasta_progress_frame, bg="#1a1a1a")
+        pasta_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        tk.Label(
+            pasta_frame,
+            text="Pasta de músicas:",
+            bg="#1a1a1a",
+            fg="#BBB",
+            font=("Arial", 9, "italic")
+        ).pack(side=tk.LEFT)
+        self.music_folder_var = tk.StringVar(value=self.music_folder)
+        pasta_entry = tk.Entry(pasta_frame, textvariable=self.music_folder_var, font=("Arial", 9), width=30, state="readonly", readonlybackground="#222", fg="#4CAF50")
+        pasta_entry.pack(side=tk.LEFT, padx=6)
+        tk.Button(
+            pasta_frame,
+            text="Selecionar Pasta",
+            command=self.selecionar_pasta_musicas,
+            bg="#2196F3",
+            fg="white",
+            font=("Arial", 9, "bold"),
+            cursor="hand2",
+            padx=8,
+            pady=2
+        ).pack(side=tk.LEFT)
+
+        # Lado direito: Progresso (compacto)
+        self.progress_frame = tk.Frame(pasta_progress_frame, bg="#232323", bd=1, relief=tk.SUNKEN, width=260)
+        self.progress_frame.pack(side=tk.RIGHT, padx=(10, 0))
+        self.progress_frame.pack_propagate(False)
+
+        progress_inner = tk.Frame(self.progress_frame, bg="#232323")
+        progress_inner.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
 
         self.progress_label = tk.Label(
-            self.progress_frame,
+            progress_inner,
             text="",
             bg="#232323",
             fg="#00e676",
-            font=("Arial", 9, "bold")
+            font=("Arial", 8, "bold")
         )
-        self.progress_label.pack(pady=(2, 0))
+        self.progress_label.pack()
 
         self.progress_canvas = tk.Canvas(
-            self.progress_frame,
-            width=260,
-            height=18,
+            progress_inner,
+            width=250,
+            height=15,
             bg="#333",
-            highlightthickness=1,
-            highlightbackground="#444"
+            highlightthickness=0
         )
-        self.progress_canvas.pack(pady=(2, 6))
+        self.progress_canvas.pack()
         self.progress_bar = self.progress_canvas.create_rectangle(
-            0, 0, 0, 18, fill="#00e676", width=0
+            0, 0, 0, 15, fill="#00e676", width=0
         )
         self.progress_animation_running = False
         
@@ -546,26 +823,12 @@ class KaraokePlayer:
         botoes_frame = tk.Frame(botoes_outer_frame, bg="#23233a")
         botoes_frame.pack(padx=10, pady=10, fill=tk.X)
 
-        btn_width = 22
+        btn_width = 21
         btn_height = 2
         btn_padx = 8
         btn_pady = 8
 
         # Botões principais lado a lado, mesma altura
-        if MODO_EVENTO_DISPONIVEL:
-            tk.Button(
-                botoes_frame,
-                text="🎉 MODO EVENTO",
-                command=self.abrir_modo_evento,
-                bg="#9C27B0",
-                fg="white",
-                font=("Arial", 10, "bold"),
-                cursor="hand2",
-                width=btn_width,
-                height=btn_height
-            ).pack(side=tk.LEFT, padx=btn_padx, pady=btn_pady)
-
-
         tk.Button(
             botoes_frame,
             text="🔎 Buscar no Catálogo",
@@ -580,7 +843,7 @@ class KaraokePlayer:
 
         tk.Button(
             botoes_frame,
-            text="📁 Carregar Qualquer MP4",
+            text="📁 Tocar MP4 (Fura fila)",
             command=self.load_file,
             bg="#4CAF50",
             fg="white",
@@ -602,14 +865,56 @@ class KaraokePlayer:
             height=btn_height
         ).pack(side=tk.LEFT, padx=btn_padx, pady=btn_pady)
 
+        if MODO_EVENTO_DISPONIVEL:
+            tk.Button(
+                botoes_frame,
+                text="🎉 MODO EVENTO",
+                command=self.abrir_modo_evento,
+                bg="#9C27B0",
+                fg="white",
+                font=("Arial", 10, "bold"),
+                cursor="hand2",
+                width=btn_width,
+                height=btn_height
+            ).pack(side=tk.LEFT, padx=btn_padx, pady=btn_pady)
+            
+        tk.Button(
+            botoes_frame,
+            text="❌ Finalizar Evento",
+            command=self.finalizar_evento_e_limpar_playlist,
+            bg="#f44336",
+            fg="white",
+            font=("Arial", 10, "bold"),
+            cursor="hand2",
+            width=btn_width,
+            height=btn_height
+        ).pack(side=tk.LEFT, padx=btn_padx, pady=btn_pady)
+
+        # Segunda linha de botões (gerenciar eventos)
+        if MODO_EVENTO_DISPONIVEL:
+            botoes_frame2 = tk.Frame(botoes_outer_frame, bg="#23233a")
+            botoes_frame2.pack(padx=10, pady=(0, 10), fill=tk.X)
+            
+            tk.Button(
+                botoes_frame2,
+                text="📋 Gerenciar Eventos",
+                command=self.abrir_gerenciar_eventos,
+                bg="#607D8B",
+                fg="white",
+                font=("Arial", 10, "bold"),
+                cursor="hand2",
+                width=btn_width,
+                height=btn_height
+            ).pack(side=tk.LEFT, padx=btn_padx, pady=btn_pady)
+
 
         # Frame horizontal para pitch e controles de reprodução
         pitch_player_row = tk.Frame(left_frame, bg="#1a1a1a")
         pitch_player_row.pack(pady=(8, 16), fill=tk.X)
 
         # Altura e largura mínimas para controles de pitch e player
-        control_height = 120  # altura aumentada para caber todos os controles
-        pitch_width = int(410 * 0.8)   # 20% menor
+        control_height = 180  # altura aumentada para caber slider e botões de navegação
+        pitch_width = int(410 * 1.1)   # 10% maior para acomodar duas colunas
         player_width = int(410 * 1.2)  # 20% maior
 
         # Pitch controls (à esquerda, personalizado)
@@ -627,37 +932,40 @@ class KaraokePlayer:
         pitch_frame.pack(side=tk.LEFT, padx=(0, 16), pady=2)
         pitch_frame.pack_propagate(False)
 
-        # Espaçamento interno
+        # Espaçamento interno - Layout de duas colunas
         pitch_inner = tk.Frame(pitch_frame, bg="#181828")
-        pitch_inner.pack(fill=tk.BOTH, expand=True, padx=12, pady=8)
+        pitch_inner.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
 
-        # Título e dica
+        # COLUNA ESQUERDA: Controle de Tom
+        left_column = tk.Frame(pitch_inner, bg="#181828")
+        left_column.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 8))
+
         tk.Label(
-            pitch_inner,
+            left_column,
             text="Controle de Tom",
             bg="#181828",
             fg="#4CAF50",
-            font=("Arial", 12, "bold")
+            font=("Arial", 11, "bold")
         ).pack(anchor=tk.W)
+        
         tk.Label(
-            pitch_inner,
-            text="Ajuste o tom da música selecionada em semitons.",
+            left_column,
+            text="Ajuste em semitons",
             bg="#181828",
             fg="#BBB",
-            font=("Arial", 9, "italic")
+            font=("Arial", 8, "italic")
         ).pack(anchor=tk.W, pady=(0, 6))
 
-        pitch_ctrl_frame = tk.Frame(pitch_inner, bg="#181828")
+        pitch_ctrl_frame = tk.Frame(left_column, bg="#181828")
         pitch_ctrl_frame.pack(pady=2, fill=tk.X)
 
-        # Semitons label
         tk.Label(
             pitch_ctrl_frame,
             text="Semitons:",
             bg="#181828",
             fg="white",
-            font=("Arial", 10, "bold")
-        ).pack(side=tk.LEFT, padx=(0, 6))
+            font=("Arial", 9, "bold")
+        ).pack(side=tk.LEFT, padx=(0, 4))
 
         self.pitch_var = tk.IntVar(value=0)
         pitch_spin = tk.Spinbox(
@@ -665,28 +973,15 @@ class KaraokePlayer:
             from_=-12,
             to=12,
             textvariable=self.pitch_var,
-            width=4,
-            font=("Arial", 16, "bold"),
+            width=3,
+            font=("Arial", 14, "bold"),
             justify="center",
             bg="#222",
             fg="#4CAF50",
             insertbackground="#4CAF50",
             relief=tk.FLAT
         )
-        pitch_spin.pack(side=tk.LEFT, padx=4)
-
-        # Valor do tom destacado
-        self.pitch_label = tk.Label(
-            pitch_ctrl_frame,
-            text="0",
-            bg="#222",
-            fg="#00e676",
-            font=("Arial", 18, "bold"),
-            width=4,
-            relief=tk.SUNKEN,
-            bd=2
-        )
-        self.pitch_label.pack(side=tk.LEFT, padx=8)
+        pitch_spin.pack(side=tk.LEFT, padx=2)
 
         def aplicar_tom():
             novo_tom = self.pitch_var.get()
@@ -695,26 +990,122 @@ class KaraokePlayer:
 
         tk.Button(
             pitch_ctrl_frame,
-            text=" OK ",
+            text="OK",
             command=aplicar_tom,
             bg="#2196F3",
             fg="white",
-            font=("Arial", 11, "bold"),
-            width=7,
+            font=("Arial", 9, "bold"),
+            width=5,
             cursor="hand2",
-            pady=7,
             relief=tk.RAISED,
             activebackground="#1976D2"
-        ).pack(side=tk.LEFT, padx=8)
+        ).pack(side=tk.LEFT, padx=4)
 
-        # Dica de uso
+        # Valor do tom destacado
+        self.pitch_label = tk.Label(
+            left_column,
+            text="Tom: 0",
+            bg="#222",
+            fg="#00e676",
+            font=("Arial", 12, "bold"),
+            relief=tk.SUNKEN,
+            bd=2,
+            padx=8,
+            pady=6
+        )
+        self.pitch_label.pack(pady=(8, 0), fill=tk.X)
+
+        # COLUNA DIREITA: Controle de Velocidade
+        right_column = tk.Frame(pitch_inner, bg="#181828")
+        right_column.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(8, 0))
+
         tk.Label(
-            pitch_inner,
-            text="Dica: Use valores negativos para abaixar e positivos para subir o tom.",
+            right_column,
+            text="Velocidade",
             bg="#181828",
-            fg="#888",
+            fg="#4CAF50",
+            font=("Arial", 11, "bold")
+        ).pack(anchor=tk.W)
+        
+        tk.Label(
+            right_column,
+            text="Ajuste a velocidade",
+            bg="#181828",
+            fg="#BBB",
             font=("Arial", 8, "italic")
-        ).pack(anchor=tk.W, pady=(8, 0))
+        ).pack(anchor=tk.W, pady=(0, 6))
+
+        # Botões de velocidade em grid 2x2
+        speed_grid = tk.Frame(right_column, bg="#181828")
+        speed_grid.pack(pady=2)
+
+        speed_btn_style = {
+            "font": ("Arial", 9, "bold"),
+            "cursor": "hand2",
+            "width": 7,
+            "height": 1,
+            "bd": 1,
+            "relief": tk.RAISED,
+            "activebackground": "#1976D2"
+        }
+
+        # Linha 1
+        speed_row1 = tk.Frame(speed_grid, bg="#181828")
+        speed_row1.pack(pady=2)
+        
+        tk.Button(
+            speed_row1,
+            text="0.9x",
+            command=lambda: self.change_speed(0.9),
+            bg="#FF5722",
+            fg="white",
+            **speed_btn_style
+        ).pack(side=tk.LEFT, padx=2)
+
+        tk.Button(
+            speed_row1,
+            text="1.0x",
+            command=lambda: self.change_speed(1.0),
+            bg="#4CAF50",
+            fg="white",
+            **speed_btn_style
+        ).pack(side=tk.LEFT, padx=2)
+
+        # Linha 2
+        speed_row2 = tk.Frame(speed_grid, bg="#181828")
+        speed_row2.pack(pady=2)
+        
+        tk.Button(
+            speed_row2,
+            text="1.05x",
+            command=lambda: self.change_speed(1.05),
+            bg="#2196F3",
+            fg="white",
+            **speed_btn_style
+        ).pack(side=tk.LEFT, padx=2)
+
+        tk.Button(
+            speed_row2,
+            text="1.10x",
+            command=lambda: self.change_speed(1.10),
+            bg="#9C27B0",
+            fg="white",
+            **speed_btn_style
+        ).pack(side=tk.LEFT, padx=2)
+
+        # Label mostrando velocidade atual
+        self.speed_label = tk.Label(
+            right_column,
+            text="Velocidade: 1.0x",
+            bg="#222",
+            fg="#00e676",
+            font=("Arial", 10, "bold"),
+            relief=tk.SUNKEN,
+            bd=2,
+            padx=8,
+            pady=6
+        )
+        self.speed_label.pack(pady=(8, 0), fill=tk.X)
 
 
         # Controles de reprodução (à direita do pitch, estilizado)
@@ -732,7 +1123,7 @@ class KaraokePlayer:
         player_frame.pack(side=tk.LEFT, padx=(0, 16), pady=2)
         player_frame.pack_propagate(False)
 
-        # Espaçamento interno
+        # Espaçamento interno - Layout vertical
         player_inner = tk.Frame(player_frame, bg="#181828")
         player_inner.pack(fill=tk.BOTH, expand=True, padx=12, pady=8)
 
@@ -752,6 +1143,10 @@ class KaraokePlayer:
             font=("Arial", 9, "italic")
         ).pack(anchor=tk.W, pady=(0, 6))
 
+        # Frame para botões de reprodução
+        btn_frame = tk.Frame(player_inner, bg="#181828")
+        btn_frame.pack(fill=tk.X, pady=(0, 8))
+
         btn_style = {
             "font": ("Arial", 11, "bold"),
             "cursor": "hand2",
@@ -763,7 +1158,7 @@ class KaraokePlayer:
         }
 
         self.play_btn = tk.Button(
-            player_inner,
+            btn_frame,
             text="▶ PLAY",
             command=self.play,
             bg="#4CAF50",
@@ -773,7 +1168,7 @@ class KaraokePlayer:
         self.play_btn.pack(side=tk.LEFT, padx=5)
 
         self.pause_btn = tk.Button(
-            player_inner,
+            btn_frame,
             text="⏸ PAUSA",
             command=self.pause,
             bg="#FF9800",
@@ -783,7 +1178,7 @@ class KaraokePlayer:
         self.pause_btn.pack(side=tk.LEFT, padx=5)
 
         self.stop_btn = tk.Button(
-            player_inner,
+            btn_frame,
             text="⏹ PARAR",
             command=self.stop,
             bg="#f44336",
@@ -794,28 +1189,74 @@ class KaraokePlayer:
 
         # Botão Próxima
         btn_proxima_style = btn_style.copy()
-        btn_proxima_style["width"] = 13  # aumentar largura para caber "PRÓXIMA"
+        btn_proxima_style["width"] = 13
         tk.Button(
-            player_inner,
+            btn_frame,
             text="⏭ PRÓXIMA",
             command=self.tocar_proxima_musica,
             bg="#673AB7",
             fg="white",
             **btn_proxima_style
         ).pack(side=tk.LEFT, padx=5)
-        
-        # Status
-        status_frame = tk.Frame(left_frame, bg="#1a1a1a")
-        status_frame.pack(fill=tk.X, pady=5)
-        
-        self.status_label = tk.Label(
-            status_frame,
-            text="Pronto",
-            bg="#1a1a1a",
-            fg="#888888",
-            font=("Arial", 8)
+
+        # Frame para slider e botões de navegação
+        nav_frame = tk.Frame(player_inner, bg="#181828")
+        nav_frame.pack(fill=tk.X, pady=(8, 0))
+
+        # Slider horizontal
+        self.seek_slider = tk.Scale(
+            nav_frame,
+            from_=0,
+            to=100,
+            orient=tk.HORIZONTAL,
+            length=400,
+            width=15,
+            bg="#333",
+            fg="#4CAF50",
+            troughcolor="#222",
+            highlightthickness=0,
+            showvalue=False,
+            command=lambda v: self.on_slider_change(v)
         )
-        self.status_label.pack()
+        self.seek_slider.pack(fill=tk.X, padx=5, pady=(0, 5))
+        
+        # Flags para controle do slider
+        self.is_seeking = False
+        
+        # Bind events para detectar quando usuário está arrastando
+        self.seek_slider.bind("<ButtonPress-1>", lambda e: self.on_slider_press())
+        self.seek_slider.bind("<ButtonRelease-1>", lambda e: self.on_slider_release())
+
+        # Botões de navegação (horizontal)
+        nav_btn_frame = tk.Frame(nav_frame, bg="#181828")
+        nav_btn_frame.pack()
+
+        nav_btn_style = {
+            "font": ("Arial", 9, "bold"),
+            "cursor": "hand2",
+            "width": 6,
+            "height": 1,
+            "bd": 1,
+            "bg": "#444",
+            "fg": "white",
+            "activebackground": "#555"
+        }
+
+        tk.Button(nav_btn_frame, text="⏮ -10s", command=lambda: self.seek_relative(-10), **nav_btn_style).pack(side=tk.LEFT, padx=3)
+        tk.Button(nav_btn_frame, text="◀ -5s", command=lambda: self.seek_relative(-5), **nav_btn_style).pack(side=tk.LEFT, padx=3)
+        tk.Button(nav_btn_frame, text="+5s ▶", command=lambda: self.seek_relative(5), **nav_btn_style).pack(side=tk.LEFT, padx=3)
+        tk.Button(nav_btn_frame, text="+10s ⏭", command=lambda: self.seek_relative(10), **nav_btn_style).pack(side=tk.LEFT, padx=3)
+        
+        # Status ao lado dos botões de navegação
+        self.status_label = tk.Label(
+            nav_btn_frame,
+            text="Pronto",
+            bg="#181828",
+            fg="#888888",
+            font=("Arial", 8),
+            padx=10
+        )
+        self.status_label.pack(side=tk.LEFT, padx=(15, 0))
         
         # ...progresso agora está abaixo do info_frame...
         
@@ -870,6 +1311,12 @@ class KaraokePlayer:
         self.playlist_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
+        # Adiciona scroll com mouse wheel
+        def on_mouse_wheel(event):
+            self.playlist_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        self.playlist_canvas.bind_all("<MouseWheel>", on_mouse_wheel)
+        
         # Mensagem vazia
         self.playlist_empty_label = tk.Label(
             self.playlist_inner_frame,
@@ -881,7 +1328,507 @@ class KaraokePlayer:
         )
         self.playlist_empty_label.pack(pady=50)
         
+        # V.U. METER - Adiciona após a playlist
+        vu_outer_frame = tk.Frame(right_frame, bg="#1a1a1a", bd=2, relief=tk.RIDGE)
+        vu_outer_frame.pack(fill=tk.X, pady=10, padx=5)
+        
+        vu_header = tk.Frame(vu_outer_frame, bg="#2d2d2d", pady=5)
+        vu_header.pack(fill=tk.X)
+        
+        tk.Label(
+            vu_header,
+            text="🎤 MEDIDOR DE MICROFONE (V.U.)",
+            bg="#2d2d2d",
+            fg="white",
+            font=("Arial", 10, "bold")
+        ).pack()
+        
+        vu_content = tk.Frame(vu_outer_frame, bg="#1a1a1a")
+        vu_content.pack(fill=tk.BOTH, padx=10, pady=10)
+        
+        # Canvas para o V.U. meter
+        self.vu_canvas = tk.Canvas(
+            vu_content,
+            width=320,
+            height=80,
+            bg="#000000",
+            highlightthickness=1,
+            highlightbackground="#444"
+        )
+        self.vu_canvas.pack(pady=5)
+        
+        # Criar barras do V.U. (estéreo)
+        self.vu_bar_left = self.vu_canvas.create_rectangle(
+            10, 20, 10, 60, fill="#00ff00", width=0
+        )
+        self.vu_bar_right = self.vu_canvas.create_rectangle(
+            10, 65, 10, 105, fill="#00ff00", width=0
+        )
+        
+        # Labels dos canais
+        self.vu_canvas.create_text(5, 40, text="L", fill="white", font=("Arial", 8, "bold"), anchor="w")
+        self.vu_canvas.create_text(5, 85, text="R", fill="white", font=("Arial", 8, "bold"), anchor="w")
+        
+        # Marcações de nível
+        for i, db in enumerate(["-40", "-20", "-10", "-5", "0"]):
+            x = 10 + (i * 60)
+            self.vu_canvas.create_line(x, 15, x, 110, fill="#333", width=1)
+            self.vu_canvas.create_text(x, 5, text=db, fill="#888", font=("Arial", 7))
+        
+        # Label de nível numérico
+        self.vu_label = tk.Label(
+            vu_content,
+            text="Nível: -∞ dB",
+            bg="#1a1a1a",
+            fg="#4CAF50",
+            font=("Arial", 9, "bold")
+        )
+        self.vu_label.pack(pady=2)
+        
+        # Controle de sensibilidade/ganho
+        sensitivity_frame = tk.Frame(vu_content, bg="#1a1a1a")
+        sensitivity_frame.pack(pady=5, fill=tk.X)
+        
+        tk.Label(
+            sensitivity_frame,
+            text="Sensibilidade:",
+            bg="#1a1a1a",
+            fg="white",
+            font=("Arial", 8)
+        ).pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.vu_gain = tk.DoubleVar(value=3.0)  # Ganho padrão de 3x para voz
+        self.vu_gain_slider = tk.Scale(
+            sensitivity_frame,
+            from_=1.0,
+            to=10.0,
+            resolution=0.5,
+            orient=tk.HORIZONTAL,
+            variable=self.vu_gain,
+            bg="#333",
+            fg="#4CAF50",
+            troughcolor="#222",
+            highlightthickness=0,
+            length=180,
+            width=12,
+            showvalue=True,
+            font=("Arial", 7)
+        )
+        self.vu_gain_slider.pack(side=tk.LEFT, padx=2)
+        
+        tk.Label(
+            sensitivity_frame,
+            text="(1x-10x)",
+            bg="#1a1a1a",
+            fg="#888",
+            font=("Arial", 7)
+        ).pack(side=tk.LEFT, padx=(5, 0))
+        
+        # Botão para ligar/desligar V.U.
+        self.vu_toggle_btn = tk.Button(
+            vu_content,
+            text="🎤 Ativar V.U. Meter",
+            command=self.toggle_vu_meter,
+            bg="#4CAF50",
+            fg="white",
+            font=("Arial", 9, "bold"),
+            cursor="hand2",
+            padx=10,
+            pady=5
+        )
+        self.vu_toggle_btn.pack(pady=5)
+        
         self.debug_log("✓ Interface configurada")
+    
+    def selecionar_pasta_musicas(self):
+        """Permite ao usuário selecionar a pasta de músicas."""
+        pasta = filedialog.askdirectory(title="Selecione a pasta de músicas")
+        if pasta:
+            self.music_folder = pasta
+            if hasattr(self, 'music_folder_var'):
+                self.music_folder_var.set(self.music_folder)
+            self.debug_log(f"Pasta de músicas alterada para: {self.music_folder}")
+    
+    def inicializar_audio(self):
+        """Inicializa o sistema de áudio para captura do microfone"""
+        if not AUDIO_DISPONIVEL:
+            self.debug_log("⚠ PyAudio não disponível - V.U. meter desabilitado")
+            self.audio_interface = None
+            return
+        
+        try:
+            self.audio_interface = pyaudio.PyAudio()
+            self.debug_log("✓ Sistema de áudio inicializado para V.U. meter")
+        except Exception as e:
+            self.debug_log(f"⚠ Erro ao inicializar áudio: {e}")
+            self.audio_interface = None
+    
+    def toggle_vu_meter(self):
+        """Liga ou desliga o V.U. meter"""
+        if self.vu_running:
+            self.parar_vu_meter()
+        else:
+            self.iniciar_vu_meter()
+    
+    def iniciar_vu_meter(self):
+        """Inicia a captura e exibição do V.U. meter"""
+        if not AUDIO_DISPONIVEL:
+            messagebox.showerror(
+                "Erro de Áudio",
+                "PyAudio não está instalado!\n\n"
+                "Para usar o V.U. meter, instale as dependências:\n"
+                "pip install pyaudio numpy"
+            )
+            return
+        
+        if not self.audio_interface:
+            messagebox.showerror(
+                "Erro de Áudio",
+                "Sistema de áudio não disponível!\n\n"
+                "Certifique-se de que o PyAudio está instalado:\n"
+                "pip install pyaudio"
+            )
+            return
+        
+        try:
+            # Configurações de áudio
+            CHUNK = 1024
+            FORMAT = pyaudio.paInt16
+            CHANNELS = 2
+            RATE = 44100
+            
+            # Abre stream de áudio
+            self.audio_stream = self.audio_interface.open(
+                format=FORMAT,
+                channels=CHANNELS,
+                rate=RATE,
+                input=True,
+                frames_per_buffer=CHUNK,
+                stream_callback=None
+            )
+            
+            self.vu_running = True
+            self.vu_toggle_btn.config(
+                text="⏹ Parar V.U. Meter",
+                bg="#f44336"
+            )
+            
+            # Inicia thread de processamento
+            threading.Thread(target=self._processar_audio_vu, args=(CHUNK,), daemon=True).start()
+            
+            self.debug_log("✓ V.U. meter ativado")
+            
+        except Exception as e:
+            self.debug_log(f"❌ Erro ao iniciar V.U. meter: {e}")
+            messagebox.showerror(
+                "Erro",
+                f"Não foi possível iniciar o V.U. meter:\n\n{e}\n\n"
+                "Verifique se há um microfone conectado."
+            )
+    
+    def parar_vu_meter(self):
+        """Para a captura do V.U. meter"""
+        self.vu_running = False
+        
+        if self.audio_stream:
+            try:
+                self.audio_stream.stop_stream()
+                self.audio_stream.close()
+            except:
+                pass
+            self.audio_stream = None
+        
+        # Reseta visual
+        self.vu_canvas.coords(self.vu_bar_left, 10, 20, 10, 60)
+        self.vu_canvas.coords(self.vu_bar_right, 10, 65, 10, 105)
+        self.vu_label.config(text="Nível: -∞ dB")
+        
+        self.vu_toggle_btn.config(
+            text="🎤 Ativar V.U. Meter",
+            bg="#4CAF50"
+        )
+        
+        self.debug_log("✓ V.U. meter desativado")
+    
+    def _processar_audio_vu(self, chunk_size):
+        """Thread que processa o áudio e atualiza o V.U. meter"""
+        while self.vu_running:
+            try:
+                # Lê dados do microfone
+                data = self.audio_stream.read(chunk_size, exception_on_overflow=False)
+                
+                # Converte para numpy array
+                audio_data = np.frombuffer(data, dtype=np.int16)
+                
+                # Separa canais (estéreo)
+                if len(audio_data) > 0:
+                    left_channel = audio_data[0::2]
+                    right_channel = audio_data[1::2]
+                    
+                    # Aplica ganho para aumentar sensibilidade
+                    gain = self.vu_gain.get()
+                    left_channel = left_channel.astype(np.float32) * gain
+                    right_channel = right_channel.astype(np.float32) * gain
+                    
+                    # Limita valores para evitar overflow
+                    left_channel = np.clip(left_channel, -32768, 32767)
+                    right_channel = np.clip(right_channel, -32768, 32767)
+                    
+                    # Calcula RMS (Root Mean Square) para cada canal
+                    rms_left = np.sqrt(np.mean(left_channel**2))
+                    rms_right = np.sqrt(np.mean(right_channel**2))
+                    
+                    # Armazena RMS médio para pontuação
+                    rms_avg = (rms_left + rms_right) / 2
+                    if hasattr(self, 'samples_microfone'):
+                        self.samples_microfone.append(float(rms_avg))
+                    
+                    # Converte para dB (escala logarítmica)
+                    # Usa referência menor para voz (10.0 ao invés de 32768.0)
+                    if rms_left > 1:
+                        db_left = 20 * np.log10(rms_left / 32768.0)
+                    else:
+                        db_left = -60
+                    
+                    if rms_right > 1:
+                        db_right = 20 * np.log10(rms_right / 32768.0)
+                    else:
+                        db_right = -60
+                    
+                    # Limita valores
+                    db_left = max(-60, min(0, db_left))
+                    db_right = max(-60, min(0, db_right))
+                    
+                    # Atualiza visual na thread principal
+                    self.root.after(0, self._atualizar_vu_visual, db_left, db_right)
+                
+            except Exception as e:
+                if self.vu_running:
+                    self.debug_log(f"Erro ao processar áudio: {e}")
+                break
+    
+    def _atualizar_vu_visual(self, db_left, db_right):
+        """Atualiza o visual do V.U. meter (chamado na thread principal)"""
+        if not self.vu_running:
+            return
+        
+        # Converte dB para largura da barra (0 a 300 pixels)
+        # -60dB = 0px, 0dB = 300px
+        width_left = int((db_left + 60) * 5)
+        width_right = int((db_right + 60) * 5)
+        
+        # Determina cor baseada no nível
+        def get_color(db):
+            if db > -6:  # Acima de -6dB (vermelho - clipping)
+                return "#ff0000"
+            elif db > -12:  # Entre -12 e -6dB (amarelo)
+                return "#ffff00"
+            else:  # Abaixo de -12dB (verde)
+                return "#00ff00"
+        
+        color_left = get_color(db_left)
+        color_right = get_color(db_right)
+        
+        # Atualiza barras
+        self.vu_canvas.coords(self.vu_bar_left, 10, 20, 10 + width_left, 60)
+        self.vu_canvas.itemconfig(self.vu_bar_left, fill=color_left)
+        
+        self.vu_canvas.coords(self.vu_bar_right, 10, 65, 10 + width_right, 105)
+        self.vu_canvas.itemconfig(self.vu_bar_right, fill=color_right)
+        
+        # Atualiza label com valor médio
+        db_avg = (db_left + db_right) / 2
+        if db_avg <= -60:
+            self.vu_label.config(text="Nível: -∞ dB")
+        else:
+            self.vu_label.config(text=f"Nível: {db_avg:.1f} dB")
+    
+    
+    def adicionar_musica_playlist_simples(self, arquivo_path, cantor, musica, codigo):
+        """Adiciona música à playlist simples (sem modo evento)"""
+        # Cria item de playlist simples
+        item = {
+            'id': len(self.playlist_items) + 1,
+            'ordem': len(self.playlist_items) + 1,
+            'participante_nome': cantor,
+            'participante_avatar': None,
+            'musica_nome': musica,
+            'arquivo_path': arquivo_path,
+            'tom_ajuste': 0,
+            'ja_tocou': False
+        }
+        
+        self.playlist_items.append(item)
+        self.atualizar_playlist_visual()
+        
+        messagebox.showinfo(
+            "Adicionado",
+            f"✅ Música adicionada à playlist!\n\n"
+            f"🎤 {cantor}\n🎵 {musica}\n🔢 {codigo}"
+        )
+        
+        self.debug_log(f"Música adicionada à playlist: {musica} - {cantor}")
+    
+    def adicionar_musica_evento(self, arquivo_path, cantor, musica, codigo):
+        """Adiciona música ao evento com seleção de participante"""
+        if not MODO_EVENTO_DISPONIVEL or not self.modo_evento_ativo:
+            self.debug_log("Modo evento não ativo - música não adicionada ao evento")
+            return
+        
+        try:
+            from karaoke_evento import SelecionarParticipanteDialog
+            import tkinter.simpledialog
+            db = KaraokeDatabase()
+            
+            # Abre diálogo para selecionar participante
+            dialog = SelecionarParticipanteDialog(self.root, self.evento_id_atual, db)
+            self.root.wait_window(dialog.dialog)
+            
+            if dialog.participante_selecionado:
+                participante = dialog.participante_selecionado
+                
+                # Pergunta sobre ajuste de tom
+                tom_ajuste = 0
+                if messagebox.askyesno("Tom", "Deseja ajustar o tom da música?"):
+                    tom_str = tkinter.simpledialog.askstring(
+                        "Ajuste de Tom",
+                        "Digite o ajuste em semitons (-12 a +12):",
+                        initialvalue="0"
+                    )
+                    if tom_str:
+                        try:
+                            tom_ajuste = int(tom_str)
+                            tom_ajuste = max(-12, min(12, tom_ajuste))
+                        except ValueError:
+                            tom_ajuste = 0
+                
+                # Adiciona ao banco de dados do evento
+                db.adicionar_musica_evento(
+                    self.evento_id_atual,
+                    participante['id'],
+                    arquivo_path,
+                    musica,
+                    tom_ajuste
+                )
+                
+                # Recarrega playlist
+                self.carregar_playlist_evento(self.evento_id_atual)
+                
+                tom_texto = f"🎹 Tom: {tom_ajuste:+d}" if tom_ajuste != 0 else "🎹 Tom: normal"
+                messagebox.showinfo(
+                    "Adicionado",
+                    f"✅ Música adicionada ao evento!\n\n"
+                    f"🎤 Participante: {participante['nome']}\n"
+                    f"🎵 Música: {musica}\n"
+                    f"🔢 Código: {codigo}\n"
+                    f"{tom_texto}"
+                )
+                
+                self.debug_log(f"Música adicionada ao evento: {musica} - {participante['nome']}")
+            else:
+                self.debug_log("Seleção de participante cancelada")
+                
+        except ImportError:
+            messagebox.showerror(
+                "Erro",
+                "Não foi possível importar o módulo de seleção de participante.\n"
+                "Verifique se karaoke_evento.py está disponível."
+            )
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao adicionar música ao evento:\n{e}")
+            self.debug_log(f"Erro ao adicionar música ao evento: {e}")
+    
+    def adicionar_musica_playlist_simples(self, arquivo_path, cantor, musica, codigo):
+        """Adiciona música à playlist simples (sem modo evento)"""
+        # Cria item de playlist simples
+        item = {
+            'id': len(self.playlist_items) + 1,
+            'ordem': len(self.playlist_items) + 1,
+            'participante_nome': cantor,
+            'participante_avatar': None,
+            'musica_nome': musica,
+            'arquivo_path': arquivo_path,
+            'tom_ajuste': 0,
+            'ja_tocou': False
+        }
+        
+        self.playlist_items.append(item)
+        self.atualizar_playlist_visual()
+        
+        messagebox.showinfo(
+            "Adicionado",
+            f"✅ Música adicionada à playlist!\n\n"
+            f"🎤 {cantor}\n🎵 {musica}\n🔢 {codigo}"
+        )
+        
+        self.debug_log(f"Música adicionada à playlist: {musica} - {cantor}")
+    
+    def adicionar_musica_evento(self, arquivo_path, cantor, musica, codigo):
+        """Adiciona música ao evento com seleção de participante"""
+        if not MODO_EVENTO_DISPONIVEL or not self.modo_evento_ativo:
+            messagebox.showerror("Erro", "Modo evento não está ativo!")
+            return
+        
+        try:
+            from karaoke_evento import SelecionarParticipanteDialog
+            db = KaraokeDatabase()
+            
+            # Abre diálogo para selecionar participante
+            dialog = SelecionarParticipanteDialog(self.root, self.evento_id_atual, db)
+            self.root.wait_window(dialog.dialog)
+            
+            if dialog.participante_selecionado:
+                participante = dialog.participante_selecionado
+                
+                # Pergunta sobre ajuste de tom
+                tom_ajuste = 0
+                if messagebox.askyesno("Tom", "Deseja ajustar o tom da música?"):
+                    tom_str = tk.simpledialog.askstring(
+                        "Ajuste de Tom",
+                        "Digite o ajuste em semitons (-12 a +12):",
+                        initialvalue="0"
+                    )
+                    if tom_str:
+                        try:
+                            tom_ajuste = int(tom_str)
+                            tom_ajuste = max(-12, min(12, tom_ajuste))
+                        except ValueError:
+                            tom_ajuste = 0
+                
+                # Adiciona ao banco de dados do evento
+                db.adicionar_musica_evento(
+                    self.evento_id_atual,
+                    participante['id'],
+                    arquivo_path,
+                    musica,
+                    tom_ajuste
+                )
+                
+                # Recarrega playlist
+                self.carregar_playlist_evento(self.evento_id_atual)
+                
+                messagebox.showinfo(
+                    "Adicionado",
+                    f"✅ Música adicionada ao evento!\n\n"
+                    f"🎤 Participante: {participante['nome']}\n"
+                    f"🎵 Música: {musica}\n"
+                    f"🔢 Código: {codigo}\n"
+                    f"🎹 Tom: {tom_ajuste:+d}" if tom_ajuste != 0 else f"🎹 Tom: normal"
+                )
+                
+                self.debug_log(f"Música adicionada ao evento: {musica} - {participante['nome']}")
+            else:
+                self.debug_log("Seleção de participante cancelada")
+                
+        except ImportError:
+            messagebox.showerror(
+                "Erro",
+                "Não foi possível importar o módulo de seleção de participante.\n"
+                "Verifique se karaoke_evento.py está disponível."
+            )
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao adicionar música ao evento:\n{e}")
+            self.debug_log(f"Erro ao adicionar música ao evento: {e}")
     
     def debug_log(self, message):
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -1108,19 +2055,12 @@ class KaraokePlayer:
         # Feedback visual
         self.status_label.config(text=f"Carregando: {os.path.basename(item['arquivo_path'])}")
         
-        # Se não está em modo evento, ativa o modo evento
-        if not self.modo_evento_ativo and MODO_EVENTO_DISPONIVEL:
-            # Pede para ativar modo evento
-            if messagebox.askyesno("Modo Evento", 
-                                  "Esta música pertence a um evento.\n\nDeseja ativar o Modo Evento para tocar?"):
-                # Aqui você pode precisar de uma lógica para encontrar/definir o evento_id
-                # Por enquanto, vou assumir que o item tem evento_id
-                if 'evento_id' in item:
-                    self.modo_evento_ativo = True
-                    self.evento_id_atual = item['evento_id']
-                    self.iniciar_modo_evento(self.evento_id_atual, item)
-                    return
-            else:
+        # Se não está em modo evento, toca normalmente
+        # Se está em modo evento, valida que a música pertence ao evento ativo
+        if self.modo_evento_ativo and MODO_EVENTO_DISPONIVEL:
+            # Verifica se a música pertence ao evento atual
+            if 'evento_id' not in item or item.get('evento_id') != self.evento_id_atual:
+                messagebox.showwarning("Aviso", "Esta música não pertence ao evento ativo.")
                 return
         
         # Toca a música
@@ -1139,7 +2079,8 @@ class KaraokePlayer:
                 result = subprocess.run([
                     'ffprobe', '-v', 'quiet', '-print_format', 'json',
                     '-show_format', '-show_streams', self.video_file
-                ], capture_output=True, text=True, check=True)
+                ], capture_output=True, text=True, check=True,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
                 
                 info = json.loads(result.stdout)
                 for stream in info['streams']:
@@ -1149,8 +2090,12 @@ class KaraokePlayer:
                         self.height = stream['height']
                         break
                 self.duration = float(info['format']['duration'])
-            except:
-                pass
+            except FileNotFoundError:
+                self.debug_log("⚠️ FFprobe não encontrado")
+                messagebox.showerror("Erro", "FFprobe não encontrado!")
+                return
+            except Exception as e:
+                self.debug_log(f"⚠️ Erro ao obter informações do vídeo: {e}")
             
             # Processa tom se necessário
             if self.pitch_shift != 0:
@@ -1202,6 +2147,236 @@ class KaraokePlayer:
         self.debug_log("🎉 Abrindo Modo Evento...")
         ModoEventoWindow(self.root, self)
     
+    def abrir_gerenciar_eventos(self):
+        """Abre janela para gerenciar eventos existentes"""
+        if not MODO_EVENTO_DISPONIVEL:
+            messagebox.showerror("Erro", "Módulos de evento não encontrados!")
+            return
+        
+        gerenciar_win = tk.Toplevel(self.root)
+        gerenciar_win.title("Gerenciar Eventos")
+        gerenciar_win.geometry("900x600")
+        gerenciar_win.configure(bg="#222")
+        gerenciar_win.transient(self.root)
+        
+        # Header
+        tk.Label(
+            gerenciar_win,
+            text="📋 Gerenciar Eventos",
+            font=("Arial", 16, "bold"),
+            bg="#222",
+            fg="white"
+        ).pack(pady=15)
+        
+        # Frame de lista
+        list_frame = tk.Frame(gerenciar_win, bg="#222")
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=10)
+        
+        # Treeview
+        columns = ("ID", "Nome", "Data Criação", "Status", "Participantes", "Músicas")
+        tree = ttk.Treeview(list_frame, columns=columns, show="headings", height=18)
+        
+        tree.heading("ID", text="ID")
+        tree.heading("Nome", text="Nome do Evento")
+        tree.heading("Data Criação", text="Data Criação")
+        tree.heading("Status", text="Status")
+        tree.heading("Participantes", text="Participantes")
+        tree.heading("Músicas", text="Músicas")
+        
+        tree.column("ID", width=50, anchor="center")
+        tree.column("Nome", width=250)
+        tree.column("Data Criação", width=150, anchor="center")
+        tree.column("Status", width=100, anchor="center")
+        tree.column("Participantes", width=100, anchor="center")
+        tree.column("Músicas", width=100, anchor="center")
+        
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        scrollbar = tk.Scrollbar(list_frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Função para carregar eventos
+        def carregar_eventos():
+            tree.delete(*tree.get_children())
+            db = KaraokeDatabase()
+            eventos = db.listar_todos_eventos()
+            
+            for evento in eventos:
+                data_criacao = datetime.fromisoformat(evento['data_criacao']).strftime("%d/%m/%Y %H:%M")
+                status = "✓ Finalizado" if evento['finalizado'] else "▶ Ativo"
+                
+                tree.insert("", "end", values=(
+                    evento['id'],
+                    evento['nome'],
+                    data_criacao,
+                    status,
+                    evento['total_participantes'],
+                    evento['total_musicas']
+                ))
+        
+        # Função para excluir evento
+        def excluir_evento():
+            selection = tree.selection()
+            if not selection:
+                messagebox.showwarning("Seleção Necessária", "Selecione um evento para excluir.")
+                return
+            
+            item = tree.item(selection[0])
+            evento_id = item['values'][0]
+            evento_nome = item['values'][1]
+            
+            resposta = messagebox.askyesno(
+                "Confirmar Exclusão",
+                f"Deseja realmente excluir o evento?\n\n"
+                f"📋 Evento: {evento_nome}\n"
+                f"🆔 ID: {evento_id}\n\n"
+                f"⚠️ ATENÇÃO: Esta ação não pode ser desfeita!\n"
+                f"Todos os participantes e músicas serão excluídos.",
+                icon='warning'
+            )
+            
+            if resposta:
+                try:
+                    db = KaraokeDatabase()
+                    db.excluir_evento(evento_id)
+                    messagebox.showinfo("Sucesso", f"Evento '{evento_nome}' excluído com sucesso!")
+                    carregar_eventos()
+                except Exception as e:
+                    messagebox.showerror("Erro", f"Erro ao excluir evento:\n{e}")
+        
+        # Função para carregar evento
+        def carregar_evento():
+            selection = tree.selection()
+            if not selection:
+                messagebox.showwarning("Seleção Necessária", "Selecione um evento para carregar.")
+                return
+            
+            item = tree.item(selection[0])
+            evento_id = item['values'][0]
+            evento_nome = item['values'][1]
+            
+            resposta = messagebox.askyesno(
+                "Carregar Evento",
+                f"Deseja carregar o evento?\n\n"
+                f"📋 {evento_nome}\n"
+                f"🆔 ID: {evento_id}\n\n"
+                f"A playlist atual será substituída."
+            )
+            
+            if resposta:
+                self.modo_evento_ativo = True
+                self.evento_id_atual = evento_id
+                self.carregar_playlist_evento(evento_id)
+                messagebox.showinfo("Sucesso", f"Evento '{evento_nome}' carregado!")
+                gerenciar_win.destroy()
+        
+        # Botões de ação
+        btn_frame = tk.Frame(gerenciar_win, bg="#222")
+        btn_frame.pack(pady=15)
+        
+        tk.Button(
+            btn_frame,
+            text="🔄 Atualizar Lista",
+            command=carregar_eventos,
+            bg="#2196F3",
+            fg="white",
+            font=("Arial", 10, "bold"),
+            cursor="hand2",
+            width=15,
+            padx=10,
+            pady=8
+        ).pack(side=tk.LEFT, padx=5)
+        
+        tk.Button(
+            btn_frame,
+            text="📂 Carregar Evento",
+            command=carregar_evento,
+            bg="#4CAF50",
+            fg="white",
+            font=("Arial", 10, "bold"),
+            cursor="hand2",
+            width=15,
+            padx=10,
+            pady=8
+        ).pack(side=tk.LEFT, padx=5)
+        
+        tk.Button(
+            btn_frame,
+            text="🗑️ Excluir Evento",
+            command=excluir_evento,
+            bg="#f44336",
+            fg="white",
+            font=("Arial", 10, "bold"),
+            cursor="hand2",
+            width=15,
+            padx=10,
+            pady=8
+        ).pack(side=tk.LEFT, padx=5)
+        
+        tk.Button(
+            btn_frame,
+            text="✖ Fechar",
+            command=gerenciar_win.destroy,
+            bg="#666",
+            fg="white",
+            font=("Arial", 10, "bold"),
+            cursor="hand2",
+            width=15,
+            padx=10,
+            pady=8
+        ).pack(side=tk.LEFT, padx=5)
+        
+        # Carregar eventos ao abrir
+        carregar_eventos()
+        
+        # Duplo clique para carregar evento
+        tree.bind("<Double-1>", lambda e: carregar_evento())
+    
+    def finalizar_evento_e_limpar_playlist(self):
+        """Finaliza o evento atual e limpa a playlist"""
+        if self.modo_evento_ativo or len(self.playlist_items) > 0:
+            resposta = messagebox.askyesno(
+                "Finalizar Evento e Limpar Playlist",
+                "Deseja finalizar o evento atual e limpar a playlist?\n\n"
+                "✓ Modo evento será desativado\n"
+                "✓ Playlist será limpa\n"
+                "✓ Reprodução será interrompida",
+                parent=self.root
+            )
+            
+            if resposta:
+                # Parar reprodução
+                self.stop()
+                
+                # Desativar modo evento
+                self.modo_evento_ativo = False
+                self.evento_id_atual = None
+                self.musica_atual_evento = None
+                
+                # Limpar playlist
+                self.playlist_items = []
+                self.selected_playlist_index = None
+                
+                # Atualizar interface
+                self.atualizar_playlist_visual()
+                self.file_label.config(text="Nenhum arquivo carregado")
+                self.status_label.config(text="✅ Evento finalizado e playlist limpa")
+                
+                self.debug_log("✅ Evento finalizado e playlist limpa")
+                
+                messagebox.showinfo(
+                    "Sucesso",
+                    "Evento finalizado e playlist limpa com sucesso!",
+                    parent=self.root
+                )
+        else:
+            messagebox.showinfo(
+                "Informação",
+                "Não há evento ativo ou playlist para limpar.",
+                parent=self.root
+            )
+    
     def iniciar_modo_evento(self, evento_id, musica):
         self.modo_evento_ativo = True
         self.evento_id_atual = evento_id
@@ -1215,7 +2390,8 @@ class KaraokePlayer:
             result = subprocess.run([
                 'ffprobe', '-v', 'quiet', '-print_format', 'json',
                 '-show_format', '-show_streams', self.video_file
-            ], capture_output=True, text=True, check=True)
+            ], capture_output=True, text=True, check=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
             
             info = json.loads(result.stdout)
             for stream in info['streams']:
@@ -1225,8 +2401,12 @@ class KaraokePlayer:
                     self.height = stream['height']
                     break
             self.duration = float(info['format']['duration'])
-        except:
-            pass
+        except FileNotFoundError:
+            self.debug_log("⚠️ FFprobe não encontrado")
+            messagebox.showerror("Erro", "FFprobe não encontrado!")
+            return
+        except Exception as e:
+            self.debug_log(f"⚠️ Erro ao obter informações do vídeo: {e}")
         
         self.pitch_shift = musica['tom_ajuste']
         self.pitch_label.config(text=f"{self.pitch_shift:+d}" if self.pitch_shift != 0 else "0")
@@ -1250,7 +2430,7 @@ class KaraokePlayer:
             return
         
         db = KaraokeDatabase()
-        tempo = self.player.get_time() / 1000.0
+        tempo = self.player.get_time() / 1000.0 if self.player else 0
         db.marcar_musica_tocada(self.musica_atual_evento['id'], tempo)
         pontos = db.calcular_pontuacao(self.musica_atual_evento['id'])
         
@@ -1277,7 +2457,8 @@ class KaraokePlayer:
                 result = subprocess.run([
                     'ffprobe', '-v', 'quiet', '-print_format', 'json',
                     '-show_format', '-show_streams', path
-                ], capture_output=True, text=True, check=True)
+                ], capture_output=True, text=True, check=True,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
                 
                 info = json.loads(result.stdout)
                 for stream in info['streams']:
@@ -1297,27 +2478,38 @@ class KaraokePlayer:
                     self.pitch_var.set(0)
                 
                 self.file_label.config(text=os.path.basename(path))
-                self.show_first_frame()
-                self.status_label.config(text="✓ Carregado! Iniciando reprodução...")
+                self.status_label.config(text="✓ Arquivo carregado!")
+                self.debug_log(f"✓ Arquivo carregado: {os.path.basename(path)}")
                 
                 # AUTOPLAY: Iniciar reprodução automaticamente após carregar
-                self.debug_log("🎬 Arquivo carregado - iniciando reprodução automática...")
-                self.root.after(500, self.play)  # Aguarda 500ms e inicia o play
+                self.root.after(500, self.play)
                 
+            except FileNotFoundError as e:
+                erro_msg = "❌ FFprobe não encontrado!\n\nO programa precisa do FFmpeg instalado."
+                self.debug_log(f"❌ Erro FileNotFoundError: {e}")
+                messagebox.showerror("Erro - FFmpeg Não Encontrado", erro_msg)
+                mostrar_erro_ffmpeg()
+            except subprocess.CalledProcessError as e:
+                erro_msg = f"❌ Erro ao analisar o vídeo:\n{e.stderr if e.stderr else 'Erro desconhecido'}"
+                self.debug_log(f"❌ Erro CalledProcessError: {e}")
+                messagebox.showerror("Erro ao Processar Vídeo", erro_msg)
             except Exception as e:
                 self.debug_log(f"❌ Erro ao carregar arquivo: {e}")
-                messagebox.showerror("Erro", str(e))
+                messagebox.showerror("Erro", f"Erro ao carregar arquivo:\n\n{str(e)}")
     
     def show_first_frame(self):
         try:
             temp = tempfile.mktemp(suffix='.jpg')
             subprocess.run(['ffmpeg', '-i', self.video_file, '-vframes', '1', '-f', 'image2', temp], 
-                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True,
+                          creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
             img = Image.open(temp)
             self.display_frame(img)
             os.unlink(temp)
-        except:
-            pass
+        except FileNotFoundError:
+            self.debug_log("⚠️ FFmpeg não encontrado para extrair frame")
+        except Exception as e:
+            self.debug_log(f"⚠️ Erro ao extrair primeiro frame: {e}")
     
     def show_progress(self, msg="Processando..."):
         self.progress_label.config(text=msg)
@@ -1361,7 +2553,7 @@ class KaraokePlayer:
         # Atualiza o valor do Spinbox e label
         if hasattr(self, 'pitch_var'):
             self.pitch_var.set(self.pitch_shift)
-        self.pitch_label.config(text=f"{self.pitch_shift:+d}" if self.pitch_shift != 0 else "0")
+        self.pitch_label.config(text=f"Tom: {self.pitch_shift:+d}" if self.pitch_shift != 0 else "Tom: 0")
 
         if self.pitch_shift != 0:
             self.process_audio_with_pitch()
@@ -1374,6 +2566,21 @@ class KaraokePlayer:
             self.processed_file = self.video_file
             self.root.config(cursor="")
             self.hide_progress()
+    
+    def change_speed(self, speed):
+        """Altera a velocidade de reprodução do vídeo"""
+        self.playback_speed = speed
+        self.speed_label.config(text=f"Velocidade: {speed}x")
+        
+        # Se estiver tocando, aplica a nova velocidade
+        if self.player and self.is_playing:
+            try:
+                self.player.set_rate(speed)
+                self.debug_log(f"⚡ Velocidade alterada para: {speed}x")
+            except Exception as e:
+                self.debug_log(f"⚠️ Erro ao alterar velocidade: {e}")
+        
+        self.debug_log(f"Velocidade de reprodução definida para: {speed}x")
     
     def process_audio_with_pitch(self):
         self.processing_pitch = True
@@ -1426,6 +2633,7 @@ class KaraokePlayer:
         self.processed_file = self.video_file
     
     def play(self):
+        """Inicia reprodução do vídeo"""
         if not self.video_file:
             if self.modo_evento_ativo and self.playlist_items:
                 if self.selected_playlist_index is None:
@@ -1440,73 +2648,282 @@ class KaraokePlayer:
                         self.iniciar_modo_evento(self.evento_id_atual, mus)
             return
         
-        if self.player.get_state() == vlc.State.Paused:
+        # Reproduz com VLC
+        try:
+            # Preparar mídia
+            media = self.vlc_instance.media_new(self.processed_file)
+            self.player.set_media(media)
+            
+            # Embutir VLC na janela secundária se disponível
+            if self.video_window and self.video_frame_secondary:
+                # Garantir que o frame está visível e atualizado
+                self.video_window.update()
+                self.video_frame_secondary.update_idletasks()
+                
+                # Limpar qualquer label de texto anterior
+                for widget in self.video_frame_secondary.winfo_children():
+                    widget.destroy()
+                
+                if os.name == 'nt':  # Windows
+                    hwnd = self.video_frame_secondary.winfo_id()
+                    self.player.set_hwnd(hwnd)
+                    self.debug_log(f"🎬 VLC embutido na janela secundária (HWND: {hwnd})")
+                else:  # Linux
+                    xid = self.video_frame_secondary.winfo_id()
+                    self.player.set_xwindow(xid)
+                    self.debug_log(f"🎬 VLC embutido na janela secundária (XID: {xid})")
+            
             self.player.play()
             self.is_playing = True
-            self.start_video_thread()
-            return
-        
-        media = self.vlc_instance.media_new(self.processed_file)
-        self.player.set_media(media)
-        self.player.play()
-        self.is_playing = True
-        self.start_video_thread()
-    
-    def start_video_thread(self):
-        if self.video_thread and self.video_thread.is_alive():
-            return
-        self.video_thread = threading.Thread(target=self.play_video, daemon=True)
-        self.video_thread.start()
-    
-    def play_video(self):
-        cmd = ['ffmpeg', '-i', self.processed_file, '-f', 'image2pipe', '-pix_fmt', 'rgb24', '-vcodec', 'rawvideo', '-']
-        self.frame_process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=10**8)
-        size = self.width * self.height * 3
-        
-        while self.is_playing:
-            try:
-                state = self.player.get_state()
-                if state in [vlc.State.Ended, vlc.State.Stopped]:
-                    if self.modo_evento_ativo:
-                        self.root.after(0, self.finalizar_musica_evento)
-                    else:
-                        self.root.after(0, self.stop)
-                    break
-                
-                raw = self.frame_process.stdout.read(size)
-                if len(raw) != size:
-                    break
-                
-                import array
-                data = array.array('B', raw)
-                img = Image.frombytes('RGB', (self.width, self.height), bytes(data))
-                self.root.after(0, self.display_frame, img)
-                time.sleep(1.0 / self.fps)
-            except:
-                break
-        
-        if self.frame_process:
-            self.frame_process.kill()
-            self.frame_process = None
-    
-    def display_frame(self, img):
-        try:
-            w, h = img.size
-            # Ajustar para o novo tamanho do video_frame (480x270)
-            scale = min(480/w, 270/h)
-            nw = int(w * scale)
-            nh = int(h * scale)
-            img = img.resize((nw, nh), Image.Resampling.LANCZOS)
-            photo = ImageTk.PhotoImage(image=img)
-            self.video_label.imgtk = photo
-            self.video_label.configure(image=photo, text="")
-        except:
-            pass
+            
+            # Aplicar velocidade de reprodução
+            if hasattr(self, 'playback_speed'):
+                self.root.after(100, lambda: self.player.set_rate(self.playback_speed))
+                self.debug_log(f"⚡ Aplicando velocidade: {self.playback_speed}x")
+            
+            # Ativa V.U. meter automaticamente e reseta amostras
+            if AUDIO_DISPONIVEL and not self.vu_running:
+                self.samples_microfone = []
+                self.tempo_inicio_musica = time.time()
+                self.root.after(500, self.iniciar_vu_meter)
+                self.debug_log("🎤 V.U. meter ativado automaticamente")
+            elif self.vu_running:
+                # Se já estava ativo, apenas reseta amostras
+                self.samples_microfone = []
+                self.tempo_inicio_musica = time.time()
+                self.debug_log("🎤 Amostras resetadas para nova música")
+            
+            self.status_label.config(text="▶ Tocando")
+            self.debug_log("▶ Play")
+        except Exception as e:
+            self.debug_log(f"❌ Erro ao reproduzir: {e}")
     
     def pause(self):
-        if self.is_playing:
+        """Pausa reprodução do vídeo"""
+        if self.player and self.is_playing:
             self.player.pause()
             self.is_playing = False
+            self.status_label.config(text="⏸ Pausado")
+            self.debug_log("⏸ Pause")
+    
+    def stop(self):
+        """Para reprodução do vídeo e calcula pontuação"""
+        if self.player:
+            self.player.stop()
+            self.is_playing = False
+            self.status_label.config(text="⏹ Parado")
+            self.debug_log("⏹ Stop")
+            
+            # Calcula e exibe pontuação se houver amostras suficientes
+            if AUDIO_DISPONIVEL and len(self.samples_microfone) > 10:
+                self.root.after(300, self.calcular_pontuacao)
+                self.debug_log(f"📊 Calculando pontuação com {len(self.samples_microfone)} amostras")
+    
+    def on_slider_press(self):
+        """Chamado quando usuário clica no slider"""
+        self.is_seeking = True
+    
+    def on_slider_release(self):
+        """Chamado quando usuário solta o slider"""
+        self.is_seeking = False
+        # Aplica a posição escolhida
+        if self.player and self.duration > 0:
+            progress = self.seek_slider.get() / 100.0
+            new_time = int(progress * self.duration * 1000)  # VLC usa milissegundos
+            self.player.set_time(new_time)
+            self.debug_log(f"⏩ Seek para: {new_time/1000:.1f}s")
+    
+    def on_slider_change(self, value):
+        """Chamado quando o valor do slider muda"""
+        # Atualiza o tempo exibido durante o arraste
+        if self.is_seeking and self.duration > 0:
+            progress = float(value) / 100.0
+            current_time = progress * self.duration
+            current_str = time.strftime('%M:%S', time.gmtime(current_time))
+            duration_str = time.strftime('%M:%S', time.gmtime(self.duration))
+            self.time_label.config(text=f"{current_str} / {duration_str}")
+    
+    def seek_relative(self, seconds):
+        """Avança ou retrocede o vídeo em segundos"""
+        if not self.player or not self.is_playing:
+            return
+        
+        try:
+            current_time = self.player.get_time()  # tempo em ms
+            new_time = max(0, current_time + (seconds * 1000))  # adiciona segundos convertidos para ms
+            
+            # Não permite avançar além da duração
+            if self.duration > 0:
+                max_time = self.duration * 1000
+                new_time = min(new_time, max_time)
+            
+            self.player.set_time(int(new_time))
+            self.debug_log(f"⏩ Seek: {seconds:+d}s (novo tempo: {new_time/1000:.1f}s)")
+            
+            # Atualizar slider horizontal
+            if hasattr(self, 'seek_slider') and self.duration > 0:
+                progress = (new_time / 1000.0) / self.duration * 100.0
+                self.seek_slider.set(progress)
+                
+        except Exception as e:
+            self.debug_log(f"⚠️ Erro ao fazer seek: {e}")
+    
+    def calcular_pontuacao(self):
+        """Calcula pontuação baseada na atividade do microfone"""
+        if not AUDIO_DISPONIVEL:
+            return
+        
+        try:
+            if len(self.samples_microfone) < 10:
+                self.debug_log("⚠ Amostras insuficientes para calcular pontuação")
+                self.pontuacao_final = 0
+                return
+            
+            microfone = np.array(self.samples_microfone)
+            
+            # Normaliza valores (0-1)
+            mic_norm = (microfone - np.min(microfone)) / (np.max(microfone) - np.min(microfone) + 1e-10)
+            
+            # Calcula métricas de qualidade vocal
+            # 1. Consistência (menor variação = melhor)
+            consistencia = 1 - np.std(mic_norm)
+            
+            # 2. Energia média (volume adequado)
+            energia_media = np.mean(mic_norm)
+            
+            # 3. Continuidade (sem muitos silêncios)
+            threshold = 0.1
+            atividade = np.sum(mic_norm > threshold) / len(mic_norm)
+            
+            # Pontuação: 40% consistência + 30% energia + 30% atividade
+            pontuacao_base = (consistencia * 0.4 + energia_media * 0.3 + atividade * 0.3) * 100
+            
+            # Limita entre 0 e 100
+            self.pontuacao_final = max(0, min(100, pontuacao_base))
+            
+            self.debug_log(f"🎯 Pontuação calculada: {self.pontuacao_final:.1f}")
+            self.debug_log(f"   Consistência: {consistencia:.2f}, Energia: {energia_media:.2f}, Atividade: {atividade:.2f}")
+            
+            # Mostra resultado
+            self.root.after(0, self.mostrar_pontuacao)
+            
+        except Exception as e:
+            self.debug_log(f"❌ Erro ao calcular pontuação: {e}")
+            self.pontuacao_final = 0
+    
+    def mostrar_pontuacao(self):
+        """Exibe a pontuação em uma janela de diálogo"""
+        pontos = int(self.pontuacao_final)
+        
+        # Determina emoji e mensagem baseado na pontuação
+        if pontos >= 90:
+            emoji = "🌟"
+            mensagem = "PERFEITO!"
+            cor = "#FFD700"
+        elif pontos >= 75:
+            emoji = "🎉"
+            mensagem = "EXCELENTE!"
+            cor = "#4CAF50"
+        elif pontos >= 60:
+            emoji = "👍"
+            mensagem = "MUITO BOM!"
+            cor = "#2196F3"
+        elif pontos >= 40:
+            emoji = "😊"
+            mensagem = "BOM!"
+            cor = "#FF9800"
+        else:
+            emoji = "💪"
+            mensagem = "CONTINUE PRATICANDO!"
+            cor = "#f44336"
+        
+        # Cria janela de pontuação
+        pontuacao_win = tk.Toplevel(self.root)
+        pontuacao_win.title("Pontuação Karaoke")
+        pontuacao_win.geometry("400x300")
+        pontuacao_win.configure(bg="#1a1a1a")
+        pontuacao_win.transient(self.root)
+        pontuacao_win.grab_set()
+        
+        # Centraliza a janela
+        pontuacao_win.update_idletasks()
+        x = (pontuacao_win.winfo_screenwidth() // 2) - (400 // 2)
+        y = (pontuacao_win.winfo_screenheight() // 2) - (300 // 2)
+        pontuacao_win.geometry(f"400x300+{x}+{y}")
+        
+        # Conteúdo
+        tk.Label(
+            pontuacao_win,
+            text=emoji,
+            bg="#1a1a1a",
+            font=("Arial", 60)
+        ).pack(pady=(20, 10))
+        
+        tk.Label(
+            pontuacao_win,
+            text=mensagem,
+            bg="#1a1a1a",
+            fg=cor,
+            font=("Arial", 18, "bold")
+        ).pack(pady=5)
+        
+        tk.Label(
+            pontuacao_win,
+            text=f"{pontos} pontos",
+            bg="#1a1a1a",
+            fg="white",
+            font=("Arial", 32, "bold")
+        ).pack(pady=10)
+        
+        # Barra de progresso visual
+        progress_frame = tk.Frame(pontuacao_win, bg="#333", width=300, height=30)
+        progress_frame.pack(pady=20)
+        progress_frame.pack_propagate(False)
+        
+        progress_bar = tk.Frame(
+            progress_frame,
+            bg=cor,
+            width=int(300 * pontos / 100),
+            height=30
+        )
+        progress_bar.pack(side=tk.LEFT)
+        
+        # Botão fechar
+        tk.Button(
+            pontuacao_win,
+            text="OK",
+            command=pontuacao_win.destroy,
+            bg="#4CAF50",
+            fg="white",
+            font=("Arial", 12, "bold"),
+            cursor="hand2",
+            padx=30,
+            pady=10
+        ).pack(pady=20)
+        
+        self.debug_log(f"📊 Pontuação exibida: {pontos} - {mensagem}")
+    
+    def update_timer(self):
+        """Atualiza o timer da interface"""
+        if self.is_playing and self.player and self.player.is_playing():
+            try:
+                current_time = self.player.get_time() / 1000.0  # Converte de ms para segundos
+                current_str = time.strftime('%M:%S', time.gmtime(current_time))
+                duration_str = time.strftime('%M:%S', time.gmtime(self.duration))
+                self.time_label.config(text=f"{current_str} / {duration_str}")
+                
+                # Atualizar slider horizontal SOMENTE se usuário não estiver arrastando
+                if hasattr(self, 'seek_slider') and self.duration > 0 and not self.is_seeking:
+                    progress = (current_time / self.duration) * 100.0
+                    self.seek_slider.set(progress)
+            except:
+                pass
+        elif self.video_file and hasattr(self, 'time_label'):
+            duration_str = time.strftime('%M:%S', time.gmtime(self.duration))
+            self.time_label.config(text=f"00:00 / {duration_str}")
+        
+        if not self.force_quit:
+            self.root.after(100, self.update_timer)
 
 
     def carregar_catalogo(self):
@@ -1549,31 +2966,14 @@ class KaraokePlayer:
             self.hide_progress()
             messagebox.showerror("Erro", f"Erro ao importar catálogo CSV:\n{e}")
 
-    def stop(self):
-        self.player.stop()
-        self.is_playing = False
-        if self.frame_process:
-            self.frame_process.kill()
-            self.frame_process = None
-        if self.video_file:
-            self.show_first_frame()
-    
-    def update_timer(self):
-        if self.is_playing and self.player.get_state() == vlc.State.Playing:
-            t = self.player.get_time() / 1000.0
-            self.time_label.config(text=f"{time.strftime('%M:%S', time.gmtime(t))} / {time.strftime('%M:%S', time.gmtime(self.duration))}")
-        elif self.video_file:
-            self.time_label.config(text=f"00:00 / {time.strftime('%M:%S', time.gmtime(self.duration))}")
-        self.root.after(100, self.update_timer)
-
 
 # NO FINAL DO ARQUIVO, modifique a parte principal:
 if __name__ == "__main__":
     root = tk.Tk()
     app = KaraokePlayer(root)
     
-    # Configurar protocolo para fechamento da janela
-    root.protocol("WM_DELETE_WINDOW", app.fechar_aplicacao)
+    # Configurar protocolo para fechamento da janela (com confirmação)
+    root.protocol("WM_DELETE_WINDOW", lambda: app.fechar_aplicacao(confirmar=True))
     
     # Tratar exceções não capturadas
     def handle_exception(exc_type, exc_value, exc_traceback):

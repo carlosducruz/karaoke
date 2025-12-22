@@ -8,5 +8,11 @@ pip install numpy opencv-python pydub Pillow simpleaudio
 
 pip install moviepy Pillow imageio[ffmpeg]
 pip install -r requirements.txt
+
 # Tentar versão mais recente do moviepy
 pip install moviepy --upgrade
+
+# Método 1 (Recomendado - Windows 10/11):
+winget install ffmpeg
+
+# instalar vlc

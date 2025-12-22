@@ -37,7 +37,7 @@ class KaraokeDatabase:
 
       
     def adicionar_musica_playlist(self, evento_id, participante_id, arquivo_path, 
-                                tom_ajuste=0, duracao_segundos=0, codigo_musica=None):
+                                tom_ajuste=0, duracao_segundos=0, codigo_musica=None, musica_nome=None):
         """Adiciona uma música à playlist"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -51,9 +51,9 @@ class KaraokeDatabase:
         
         cursor.execute("""
             INSERT INTO playlist (evento_id, participante_id, arquivo_path, 
-                                tom_ajuste, ordem, duracao_segundos)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (evento_id, participante_id, arquivo_path, tom_ajuste, ordem, duracao_segundos))
+                                tom_ajuste, ordem, duracao_segundos, musica_nome)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (evento_id, participante_id, arquivo_path, tom_ajuste, ordem, duracao_segundos, musica_nome))
         
         musica_id = cursor.lastrowid
         conn.commit()
@@ -243,10 +243,95 @@ class KaraokeDatabase:
                 ja_tocou INTEGER DEFAULT 0,
                 duracao_segundos REAL,
                 tempo_cantado REAL DEFAULT 0,
+                musica_nome TEXT,
                 FOREIGN KEY (evento_id) REFERENCES eventos(id),
                 FOREIGN KEY (participante_id) REFERENCES participantes(id)
             )
         """)
+        
+        # Tabela do catálogo
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS catalogo (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cantor TEXT,
+                cod TEXT,
+                musica TEXT,
+                inicio TEXT
+            )
+        """)
+        
+        conn.commit()
+        conn.close()
+        
+        # Executa migrations para adicionar colunas que possam estar faltando em bancos antigos
+        self._executar_migrations()
+    
+    def _executar_migrations(self):
+        """Executa migrations para adicionar colunas que possam estar faltando em bancos existentes"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            # Migration 1: Adicionar coluna musica_nome na playlist se não existir
+            cursor.execute("PRAGMA table_info(playlist)")
+            columns = [column[1] for column in cursor.fetchall()]
+            
+            if 'musica_nome' not in columns:
+                cursor.execute("ALTER TABLE playlist ADD COLUMN musica_nome TEXT")
+                conn.commit()
+                print("✅ Migration: Coluna 'musica_nome' adicionada à tabela playlist")
+            
+            # Adicione aqui futuras migrations conforme necessário
+            # Migration 2: ...
+            # Migration 3: ...
+            
+        except Exception as e:
+            print(f"⚠️ Erro ao executar migrations: {e}")
+        finally:
+            conn.close()
+    
+    def listar_todos_eventos(self):
+        """Lista todos os eventos do banco de dados"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT e.id, e.nome, e.data_criacao, e.data_finalizacao, 
+                   e.status, e.finalizado,
+                   COUNT(DISTINCT p.id) as total_participantes,
+                   COUNT(pl.id) as total_musicas
+            FROM eventos e
+            LEFT JOIN participantes p ON e.id = p.evento_id
+            LEFT JOIN playlist pl ON e.id = pl.evento_id
+            GROUP BY e.id
+            ORDER BY e.data_criacao DESC
+        """)
+        
+        eventos = []
+        for row in cursor.fetchall():
+            eventos.append({
+                'id': row[0],
+                'nome': row[1],
+                'data_criacao': row[2],
+                'data_finalizacao': row[3],
+                'status': row[4],
+                'finalizado': row[5] == 1,
+                'total_participantes': row[6],
+                'total_musicas': row[7]
+            })
+        
+        conn.close()
+        return eventos
+    
+    def excluir_evento(self, evento_id):
+        """Exclui completamente um evento e todos os seus dados relacionados"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Exclui na ordem correta para respeitar foreign keys
+        cursor.execute("DELETE FROM playlist WHERE evento_id = ?", (evento_id,))
+        cursor.execute("DELETE FROM participantes WHERE evento_id = ?", (evento_id,))
+        cursor.execute("DELETE FROM eventos WHERE id = ?", (evento_id,))
         
         conn.commit()
         conn.close()
@@ -363,7 +448,7 @@ class KaraokeDatabase:
         cursor.execute("""
             SELECT p.id, p.arquivo_path, p.tom_ajuste, p.ordem, p.ja_tocou,
                    p.duracao_segundos, p.tempo_cantado,
-                   part.nome, part.avatar_path, part.id
+                   part.nome, part.avatar_path, part.id, p.evento_id, p.musica_nome
             FROM playlist p
             JOIN participantes part ON p.participante_id = part.id
             WHERE p.evento_id = ?
@@ -382,7 +467,9 @@ class KaraokeDatabase:
                 'tempo_cantado': row[6],
                 'participante_nome': row[7],
                 'participante_avatar': row[8],
-                'participante_id': row[9]
+                'participante_id': row[9],
+                'evento_id': row[10],
+                'musica_nome': row[11]
             })
         
         conn.close()
@@ -515,25 +602,4 @@ class KaraokeDatabase:
         cursor.execute("DELETE FROM eventos WHERE id = ?", (evento_id,))
         
         conn.commit()
-        conn.close()
-
-    # Adicione este método na classe KaraokeDatabase em karaoke_database.py
-
-    def adicionar_coluna_musica_nome(self):
-        """Adiciona a coluna musica_nome na tabela playlist se não existir"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Verifica se a coluna já existe
-        cursor.execute("PRAGMA table_info(playlist)")
-        columns = [column[1] for column in cursor.fetchall()]
-        
-        if 'musica_nome' not in columns:
-            cursor.execute("""
-                ALTER TABLE playlist
-                ADD COLUMN musica_nome TEXT
-            """)
-            conn.commit()
-            print("✅ Coluna 'musica_nome' adicionada à tabela playlist")
-        
         conn.close()

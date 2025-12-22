@@ -73,6 +73,8 @@ class ModoEventoWindow:
         )
         self.nome_evento_entry.pack(pady=10)
         self.nome_evento_entry.insert(0, "Karaoke Night")
+        self.nome_evento_entry.focus_set()  # Define foco no campo
+        self.nome_evento_entry.icursor(tk.END)  # Posiciona cursor no final
         
         tk.Button(
             frame,
@@ -363,8 +365,8 @@ class ModoEventoWindow:
         ).pack(pady=15)
         
     def buscar_arquivo_mp4(self, codigo):
-        """Busca arquivo MP4 na pasta C:\\temp\\musicas e subpastas"""
-        base_path = r"C:\\temp\\musicas"
+        """Busca arquivo MP4 na pasta de músicas selecionada e subpastas"""
+        base_path = self.karaoke_player.music_folder
         
         # Converte para string e remove espaços
         codigo_str = str(codigo).strip()
@@ -380,7 +382,7 @@ class ModoEventoWindow:
         if not os.path.exists(base_path):
             messagebox.showwarning(
                 "Pasta não encontrada",
-                f"A pasta C:\\temp\\musicas não foi encontrada.\nVerifique se ela existe."
+                f"A pasta {base_path} não foi encontrada.\nVerifique se ela existe."
             )
             return None
             
@@ -494,18 +496,38 @@ class ModoEventoWindow:
         info_frame = tk.Frame(item, bg=bg_color)
         info_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10)
         
+        # Extrair código do nome do arquivo e buscar nome da música no catálogo
         nome_arquivo = os.path.basename(musica['arquivo_path'])
+        codigo = os.path.splitext(nome_arquivo)[0]  # Remove .mp4
+        
+        # Tentar buscar nome da música no catálogo
+        musica_nome = None
+        try:
+            resultados = self.db.buscar_catalogo(codigo)
+            if resultados and len(resultados) > 0:
+                # resultados[0] = (cantor, codigo, musica, inicio)
+                musica_nome = resultados[0][2]
+        except:
+            pass
+        
+        # Se encontrou nome da música, exibe; senão, exibe nome do arquivo
+        if musica_nome:
+            texto_musica = musica_nome[:40] if len(musica_nome) > 40 else musica_nome
+        else:
+            texto_musica = nome_arquivo[:40]
+        
         tk.Label(
             info_frame,
-            text=nome_arquivo[:40],
+            text=f"🎵 {texto_musica}",
             bg=bg_color,
             fg="white",
-            font=("Arial", 11)
+            font=("Arial", 11, "bold")
         ).pack(anchor=tk.W)
         
-        detalhes = f"🎤 {musica['participante_nome']}"
+        # Linha 2: Participante e código
+        detalhes = f"🎤 {musica['participante_nome']} | 🔢 {codigo}"
         if musica['tom_ajuste'] != 0:
-            detalhes += f" | Tom: {musica['tom_ajuste']:+d}"
+            detalhes += f" | 🎹 Tom: {musica['tom_ajuste']:+d}"
         
         tk.Label(
             info_frame,
@@ -838,10 +860,29 @@ class ModoEventoWindow:
                         f"❌ Arquivo não encontrado para código: {codigo}",
                     fg="#f44336"
                 )
+                # Mostrar alerta ao usuário
+                messagebox.showwarning(
+                    "Arquivo Não Encontrado",
+                    f"❌ Arquivo não encontrado!\n\n"
+                    f"🎤 Cantor: {cantor}\n"
+                    f"🎵 Música: {musica_nome}\n"
+                    f"🔢 Código: {codigo}\n\n"
+                    f"📁 Procurando por: '{codigo}.mp4'\n"
+                    f"📂 Pasta: {self.karaoke_player.music_folder}\n\n"
+                    f"Você pode adicionar mesmo assim, mas não poderá reproduzir.",
+                    parent=dialog
+                )
         
         # Configurar eventos do treeview
         tree.bind('<<TreeviewSelect>>', on_tree_select)
         tree.bind('<ButtonRelease-1>', on_tree_select)
+        
+        def on_double_click(event):
+            """Adiciona música ao dar duplo clique"""
+            if self.musica_selecionada:
+                salvar()
+        
+        tree.bind('<Double-1>', on_double_click)
         
         def salvar():
             """Salva a música na playlist"""
@@ -873,7 +914,7 @@ class ModoEventoWindow:
             
             # Usar o método adicionar_musica_playlist que agora deve buscar o arquivo
             # Se não tivermos arquivo, usaremos um caminho baseado no código
-            arquivo_path = self.musica_selecionada['arquivo'] or f"C:\\temp\\musicas\\{self.musica_selecionada['codigo']}.mp4"
+            arquivo_path = self.musica_selecionada['arquivo'] or os.path.join(self.karaoke_player.music_folder, f"{self.musica_selecionada['codigo']}.mp4")
             
             # Adiciona à playlist
             self.db.adicionar_musica_playlist(
@@ -881,7 +922,8 @@ class ModoEventoWindow:
                 participante_id=participante_id,
                 arquivo_path=arquivo_path,
                 tom_ajuste=tom_var.get(),
-                codigo_musica=self.musica_selecionada['codigo']  # Novo parâmetro
+                codigo_musica=self.musica_selecionada['codigo'],  # Novo parâmetro
+                musica_nome=self.musica_selecionada['musica']  # Nome da música
             )
             
             self.atualizar_playlist()

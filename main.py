@@ -718,7 +718,7 @@ class KaraokePlayer:
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
         # Vídeo (menor)
-        video_frame = tk.Frame(left_frame, bg="#000000", width=480, height=270)
+        video_frame = tk.Frame(left_frame, bg="#000000", width=380, height=170)
         video_frame.pack(padx=5, pady=5)
         video_frame.pack_propagate(False)
 

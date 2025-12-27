@@ -150,9 +150,10 @@ pyinstaller --onefile --windowed --icon=avatares/karaoke.ico --name=KaraokePlaye
 
 
 ## 📋 Resumo: O que precisa para rodar o Karaoke Player
-🎯 Opção VLC + FFmpeg + KaraokePlayer.exe (MAIS SIMPLES) ⭐
-Requisitos:
 
+🎯 Opção VLC + FFmpeg + KaraokePlayer.exe (MAIS SIMPLES) 
+
+⭐ Requisitos:
 Windows 10/11
 VLC Player instalado → baixar videolan.org
 FFmpeg instalado → winget install ffmpeg

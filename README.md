@@ -144,6 +144,6 @@ python main.py
 
 ```
 
-### Caso queira gerar um executável
+### Caso queira gerar um novo executável
 
 pyinstaller --onefile --windowed --icon=avatares/karaoke.ico --name=KaraokePlayer main.py

@@ -72,15 +72,15 @@ winget install ffmpeg
    - **OK** em todas as janelas
 
 4. **Testar:**
-   - Feche e reabra o PowerShell/CMD
+   - Feche e reabra o PowerShell ou Console (CMD)
    - Digite: `ffmpeg -version`
 
----
+--- 
  
  
-## 🔧 Executar o código fonte do Karaoke Player
+## 🔧 Obtenha codigo fonte e executável do Karaoke Player  
 
-### baixe o aplicativo do repositório
+### Baixe do repositório GIT
 
 #### Caso não tenha o git, instale conforme abaixo
 
@@ -93,6 +93,26 @@ winget install ffmpeg
     - Final de Linha: A opção padrão de "Checkout Windows, commit Unix" (CRLF) é geralmente a melhor para compatibilidade.
 5. Finalização: Clique em Install e depois em Finish. 
 
+
+#### Abra uma janela nova Console do Prompt de Comando
+
+6. Baixe o código fonte e após entre na pasta karaoke
+
+``` console
+git clone https://github.com/carlosducruz/karaoke.git
+cd karaoke
+git pull
+
+```
+
+### 🚀 Executar  o Karaoke Player pelo executável (Opção Mais Simples)
+
+* Abra o explorador de arquivos (no windows o Explorer) e acesse a pasta dist 
+* Os arquivos KaraokePlayer.exe e karaoke_eventos.db e karaoke_debug.log (opcional) devem estar presentes
+* Dê um duplo cliquem no KaraokePlayer.exe
+
+
+### 🚀 Executar  o Karaoke Player pelo código fonte (Opção Avançada)
 #### Caso necessário instale o python
 
 * Método 1: Via Site Oficial (Recomendado para controle total)
@@ -103,20 +123,9 @@ winget install ffmpeg
 5. Desabilite Limite de Caminho (Opcional): No final, pode aparecer uma opção para desabilitar o limite de comprimento de caminho do Windows; habilite-a para evitar problemas futuros. 
 
 Método 2: Via Microsoft Store (Mais Simples)
+ 
 
-
-#### Abra uma janela nova Console do Prompt de Comando
-
-1. Baixe o código fonte e após entre na pasta karaoke
-
-``` console
-git clone https://github.com/carlosducruz/karaoke.git
-cd karaoke
-git pull
-
-```
-
-2. Instale as libs mínimas para o Python, crie o ambiente inicial, ative-o e por fim instale todas as demais libs necessárias para o projeto
+* Instale as libs mínimas para o Python, crie o ambiente inicial, ative-o e por fim instale todas as demais libs necessárias para o projeto
 
 ``` console
 
@@ -127,10 +136,14 @@ pip install -r requirements.txt
 
 ``` 
  
-3. Ative o ambiente Python, caso não esteja ativo,  e Execute o aplicativo
+* Ative o ambiente Python, caso não esteja ativo,  e Execute o aplicativo
 
 ``` console
 venv\Scripts\activate
 python main.py
 
 ```
+
+### Caso queira gerar um executável
+
+pyinstaller --onefile --windowed --icon=avatares/karaoke.ico --name=KaraokePlayer main.py

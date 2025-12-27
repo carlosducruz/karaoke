@@ -1,6 +1,36 @@
 # 🎬 Requisitos para executar o Karaoke Player
 
-## 🔧 Instalação do VLC Player tocar o Karaoke Player
+
+## 📋 Resumo: O que precisa para rodar o Karaoke Player
+
+🎯 Opção VLC + FFmpeg + KaraokePlayer.exe (MAIS SIMPLES) 
+
+⭐ Requisitos:
+
+* Windows 10/11
+* VLC Player instalado → baixar videolan.org
+* FFmpeg instalado → winget install ffmpeg
+
+🚀 Como rodar:
+
+* Baixe o código do GitHub:
+
+``` bash
+git clone https://github.com/carlosducruz/karaoke.git
+cd karaoke
+```
+
+* Vá na pasta dist/
+   Dê duplo clique em KaraokePlayer.exe
+
+
+🎉 Iniciar o Karaokê! 🎉
+
+--- 
+
+**detalhando ...**
+
+## 🔧 Instalação do VLC Player
 
 ### Método 1: Pelo Site Oficial (Recomendado)
 * Acesse o Site: Abra seu navegador e vá para videolan.org.
@@ -19,7 +49,7 @@ Siga os Passos:
 
 ---
 
-## 🔧 Instalação do FFmpeg para Karaoke Player
+## 🔧 Instalação do FFmpeg 
 
 O **Karaoke Player** precisa do **FFmpeg** instalado para processar vídeos e áudio.
 
@@ -78,7 +108,7 @@ winget install ffmpeg
 --- 
  
  
-## 🔧 Obtenha codigo fonte e executável do Karaoke Player  
+## 🔧 Obtenha codigo fonte e executável 
 
 ### Baixe do repositório GIT
 
@@ -105,7 +135,7 @@ git pull
 
 ```
 
-### 🚀 Executar  o Karaoke Player pelo executável (Opção Mais Simples)
+### 🚀 Executar o Karaoke Player pelo executável (Opção Mais Simples)
 
 * Abra o explorador de arquivos (no windows o Explorer) e acesse a pasta dist 
 * Os arquivos KaraokePlayer.exe e karaoke_eventos.db e karaoke_debug.log (opcional) devem estar presentes
@@ -147,29 +177,3 @@ python main.py
 ### Caso queira gerar um novo executável
 
 pyinstaller --onefile --windowed --icon=avatares/karaoke.ico --name=KaraokePlayer main.py
-
-
-## 📋 Resumo: O que precisa para rodar o Karaoke Player
-
-🎯 Opção VLC + FFmpeg + KaraokePlayer.exe (MAIS SIMPLES) 
-
-⭐ Requisitos:
-
-* Windows 10/11
-* VLC Player instalado → baixar videolan.org
-* FFmpeg instalado → winget install ffmpeg
-
-🚀 Como rodar:
-
-* Baixe o código do GitHub:
-
-``` bash
-git clone https://github.com/carlosducruz/karaoke.git
-cd karaoke
-```
-
-* Vá na pasta dist/
-   Dê duplo clique em KaraokePlayer.exe
-
-
-🎉 Iniciar o Karaokê! 🎉

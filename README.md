@@ -147,3 +147,26 @@ python main.py
 ### Caso queira gerar um novo executável
 
 pyinstaller --onefile --windowed --icon=avatares/karaoke.ico --name=KaraokePlayer main.py
+
+
+## 📋 Resumo: O que precisa para rodar o Karaoke Player
+🎯 Opção VLC + FFmpeg + KaraokePlayer.exe (MAIS SIMPLES) ⭐
+Requisitos:
+
+Windows 10/11
+VLC Player instalado → baixar videolan.org
+FFmpeg instalado → winget install ffmpeg
+
+Como rodar:
+
+Baixe o código do GitHub:
+
+``` bash
+git clone https://github.com/carlosducruz/karaoke.git
+cd karaoke
+```
+
+Vá na pasta dist/
+Dê duplo clique em KaraokePlayer.exe
+
+Iniciar o Karaokê! 🎉

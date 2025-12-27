@@ -36,7 +36,7 @@ Se aparecer a versão, ** pare por aqui, pois já estão instalados!** ✓
 
 ---
 
-### 📥 Como Instalar no Windows
+### 📥 Como Instalar o FFmpeg no Windows
 
 #### Opção Principal: Usando Winget (Recomendado - Windows 10/11)
 
@@ -82,7 +82,7 @@ winget install ffmpeg
 
 ### Baixe do repositório GIT
 
-#### Caso não tenha o git, instale conforme abaixo
+#### Caso não tenha o git, instale-o conforme abaixo
 
 * Passo a Passo
 1. Download: Acesse o site oficial do Git para Windows: https://git-scm.com/download/win e baixe o instalador.

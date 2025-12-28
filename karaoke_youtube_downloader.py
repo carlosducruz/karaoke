@@ -17,10 +17,15 @@ class YouTubeDownloaderWindow:
         self.download_em_progresso = False
         self.busca_em_progresso = False
         self.cancelar_busca = False
+        self.selected_video_index = None
         
+        # Sincroniza chamadas ao yt_dlp para evitar conflitos entre threads
+        self.ytdlp_lock = threading.Lock()
+
         # VLC para preview
         self.vlc_instance = vlc.Instance('--no-xlib', '--no-video-title-show')
         self.preview_player = None
+        self.preview_stop_after = None
         
         # Criar janela
         self.window = tk.Toplevel(parent)
@@ -406,18 +411,19 @@ class YouTubeDownloaderWindow:
                     'extract_flat': True,
                 }
                 
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    # Verifica cancelamento antes de iniciar
-                    if self.cancelar_busca:
-                        self.window.after(0, lambda: self.progress_label.config(
-                            text="⚠️ Busca cancelada pelo usuário"
-                        ))
-                        return
-                    
-                    resultado = ydl.extract_info(
-                        f"ytsearch{quantidade}:{termo}",
-                        download=False
-                    )
+                with self.ytdlp_lock:
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        # Verifica cancelamento antes de iniciar
+                        if self.cancelar_busca:
+                            self.window.after(0, lambda: self.progress_label.config(
+                                text="⚠️ Busca cancelada pelo usuário"
+                            ))
+                            return
+                        
+                        resultado = ydl.extract_info(
+                            f"ytsearch{quantidade}:{termo}",
+                            download=False
+                        )
                     
                     # Verifica cancelamento após busca
                     if self.cancelar_busca:
@@ -446,7 +452,8 @@ class YouTubeDownloaderWindow:
                                 'duracao': duracao,
                                 'duracao_str': f"{duracao_min}:{duracao_sec:02d}",
                                 'canal': video.get('channel', 'Desconhecido'),
-                                'thumbnail': video.get('thumbnail', '')
+                                'thumbnail': video.get('thumbnail', ''),
+                                'arquivo_local': None
                             })
                 
                 if not self.cancelar_busca:
@@ -508,14 +515,25 @@ class YouTubeDownloaderWindow:
             return
         
         video = self.videos_encontrados[index]
+        self.selected_video_index = index
         
         # Atualiza informações
         self.info_titulo.config(text=f"🎵 {video['titulo']}")
         self.info_canal.config(text=f"📺 Canal: {video['canal']}")
         self.info_duracao.config(text=f"⏱️ Duração: {video['duracao_str']}")
-        
-        # Habilita botão de preview
-        self.preview_btn.config(state=tk.NORMAL)
+
+        arquivo_local = video.get('arquivo_local')
+        if arquivo_local and os.path.exists(arquivo_local):
+            self.preview_btn.config(state=tk.NORMAL, text="▶️ Preview (10s)")
+            if not self.preview_label.winfo_ismapped():
+                self.preview_label.pack(expand=True)
+            self.preview_label.config(text="Clique para assistir ao preview")
+        else:
+            self.preview_btn.config(state=tk.DISABLED, text="▶️ Preview (10s)")
+            # Garante que o label esteja visível informando o usuário
+            if not self.preview_label.winfo_ismapped():
+                self.preview_label.pack(expand=True)
+            self.preview_label.config(text="Baixe o vídeo para habilitar o preview")
 
     def tocar_preview(self):
         """Toca preview de 10 segundos do vídeo selecionado"""
@@ -526,6 +544,15 @@ class YouTubeDownloaderWindow:
         index = self.tree.index(selection[0])
         video = self.videos_encontrados[index]
         
+        arquivo_local = video.get('arquivo_local')
+        if not arquivo_local or not os.path.exists(arquivo_local):
+            if messagebox.askyesno(
+                "Preview indisponível",
+                "É necessário baixar o vídeo para ver o preview. Deseja baixar agora?"
+            ):
+                self.baixar_video(video['url'], video['titulo'], video_item=video, auto_preview=True)
+            return
+
         self.preview_label.config(text="⏳ Carregando preview...")
         self.preview_btn.config(state=tk.DISABLED, text="⏳ Carregando...")
         
@@ -534,11 +561,10 @@ class YouTubeDownloaderWindow:
                 # Para player anterior se existir
                 if self.preview_player:
                     self.preview_player.stop()
-                
+
                 # Cria novo player
                 self.preview_player = self.vlc_instance.media_player_new()
-                media = self.vlc_instance.media_new(video['url'])
-                self.preview_player.set_media(media)
+                media = self.vlc_instance.media_new(arquivo_local)
                 
                 # Embute na janela
                 self.window.update()
@@ -549,12 +575,17 @@ class YouTubeDownloaderWindow:
                     xid = self.preview_frame.winfo_id()
                     self.preview_player.set_xwindow(xid)
                 
+                self.preview_player.set_media(media)
+                
                 # Inicia reprodução
                 self.preview_player.play()
                 
                 # Atualiza botões
                 self.window.after(0, lambda: self.preview_label.pack_forget())
                 self.window.after(0, lambda: self.atualizar_controles_preview(True))
+
+                # Para automaticamente após 10 segundos de preview
+                self._agendar_parada_preview()
                 
             except Exception as ex:
                 error_msg = str(ex)
@@ -568,6 +599,27 @@ class YouTubeDownloaderWindow:
                 ))
         
         threading.Thread(target=carregar_preview, daemon=True).start()
+    
+    def _agendar_parada_preview(self):
+        """Agenda parada automática do preview em 10 segundos."""
+        self._cancelar_parada_preview()
+        self.preview_stop_after = self.window.after(10000, self._parar_preview_automatico)
+
+    def _cancelar_parada_preview(self):
+        """Cancela parada automática agendada, se houver."""
+        if self.preview_stop_after is not None:
+            try:
+                self.window.after_cancel(self.preview_stop_after)
+            except Exception:
+                pass
+            self.preview_stop_after = None
+
+    def _parar_preview_automatico(self):
+        """Encerra o preview automaticamente caso ainda esteja tocando."""
+        self.preview_stop_after = None
+        if self.preview_player and self.preview_player.is_playing():
+            self.parar_preview()
+
 
     def atualizar_controles_preview(self, playing):
         """Atualiza os controles do preview"""
@@ -630,6 +682,7 @@ class YouTubeDownloaderWindow:
 
     def parar_preview(self):
         """Para completamente o preview"""
+        self._cancelar_parada_preview()
         if self.preview_player:
             self.preview_player.stop()
             self.preview_label.config(text="Preview parado")
@@ -652,7 +705,7 @@ class YouTubeDownloaderWindow:
         index = self.tree.index(selection[0])
         video = self.videos_encontrados[index]
         
-        self.baixar_video(video['url'], video['titulo'])
+        self.baixar_video(video['url'], video['titulo'], video_item=video)
     
     def baixar_url_direta(self):
         """Baixa vídeo de uma URL direta"""
@@ -667,7 +720,7 @@ class YouTubeDownloaderWindow:
         
         self.baixar_video(url)
         
-    def baixar_video(self, url, titulo=None):
+    def baixar_video(self, url, titulo=None, video_item=None, auto_preview=False):
         """Baixa um vídeo do YouTube"""
         if self.download_em_progresso:
             messagebox.showwarning("Aguarde", "Já há um download em progresso!")
@@ -715,25 +768,39 @@ class YouTubeDownloaderWindow:
                     'noplaylist': True,  # IMPORTANTE: não baixar playlists
                 }
                 
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(url, download=True)
-                    arquivo = ydl.prepare_filename(info)
-                    
-                    # Se baixou vídeo e áudio separados, junta-los
-                    if '_' in os.path.basename(arquivo):
-                        # Remove o sufixo de arquivos separados
-                        base_name = os.path.splitext(os.path.basename(arquivo))[0]
-                        if base_name.endswith('.f' + info.get('format_id', '')):
-                            base_name = base_name.rsplit('.', 1)[0]
-                        arquivo = os.path.join(self.music_folder, base_name + '.mp4')
+                with self.ytdlp_lock:
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        info = ydl.extract_info(url, download=True)
+                        arquivo = ydl.prepare_filename(info)
+                        
+                        # Se baixou vídeo e áudio separados, junta-los
+                        if '_' in os.path.basename(arquivo):
+                            # Remove o sufixo de arquivos separados
+                            base_name = os.path.splitext(os.path.basename(arquivo))[0]
+                            if base_name.endswith('.f' + info.get('format_id', '')):
+                                base_name = base_name.rsplit('.', 1)[0]
+                            arquivo = os.path.join(self.music_folder, base_name + '.mp4')
                 
+                def pos_download():
+                    if video_item is not None:
+                        video_item['arquivo_local'] = arquivo
+                        if (self.selected_video_index is not None and
+                                self.videos_encontrados[self.selected_video_index] is video_item):
+                            self.preview_btn.config(state=tk.NORMAL, text="▶️ Preview (10s)")
+                            if not self.preview_label.winfo_ismapped():
+                                self.preview_label.pack(expand=True)
+                            self.preview_label.config(text="Clique para assistir ao preview")
+                        if auto_preview and video_item in self.videos_encontrados:
+                            # Garante que o preview será iniciado assim que o download terminar
+                            self.tocar_preview()
+
                 self.window.after(0, lambda: messagebox.showinfo(
                     "Sucesso",
                     f"✅ Vídeo baixado com sucesso!\n\n"
                     f"📁 {os.path.basename(arquivo)}\n\n"
                     f"Local: {self.music_folder}"
                 ))
-                
+                self.window.after(0, pos_download)
                 self.window.after(0, lambda: self.progress_bar.config(value=100))
                 
             except Exception as ex:

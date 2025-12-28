@@ -4,3 +4,4 @@ imageio-ffmpeg
 PyPDF2
 sounddevice
 numpy
+yt-dlp

@@ -12,6 +12,7 @@ import json
 from datetime import datetime
 import sys
 import signal
+from karaoke_youtube_downloader import YouTubeDownloaderWindow
 
 try:
     import sounddevice as sd
@@ -146,7 +147,7 @@ class KaraokePlayer:
         self.root.geometry("1200x780")
         self.root.configure(bg="#1a1a1a")
         self.force_quit = False  # Adicione esta flag
-        self.music_folder = r"D:\\"
+        self.music_folder = r"D:/"
 
         # LOG INICIAL
         self.debug_log("=" * 60)
@@ -823,7 +824,7 @@ class KaraokePlayer:
         botoes_frame = tk.Frame(botoes_outer_frame, bg="#23233a")
         botoes_frame.pack(padx=10, pady=10, fill=tk.X)
 
-        btn_width = 21
+        btn_width = 20
         btn_height = 2
         btn_padx = 8
         btn_pady = 8
@@ -855,7 +856,7 @@ class KaraokePlayer:
 
         tk.Button(
             botoes_frame,
-            text="📚 Importar Catálogo (CSV)",
+            text="📚 Importar Catálogo",
             command=self.carregar_catalogo,
             bg="#FF9800",
             fg="white",
@@ -907,6 +908,17 @@ class KaraokePlayer:
                 height=btn_height
             ).pack(side=tk.LEFT, padx=btn_padx, pady=btn_pady)
 
+            tk.Button(
+                botoes_frame2,
+                text="📥 Baixar do YouTube",
+                command=self.abrir_youtube_downloader,
+                bg="#E91E63",
+                fg="white",
+                font=("Arial", 10, "bold"),
+                cursor="hand2",
+                width=btn_width,
+                height=btn_height
+            ).pack(side=tk.LEFT, padx=btn_padx, pady=btn_pady)
 
         # Frame horizontal para pitch e controles de reprodução
         pitch_player_row = tk.Frame(left_frame, bg="#1a1a1a")
@@ -2137,6 +2149,11 @@ class KaraokePlayer:
         self.playlist_items = db.obter_playlist(evento_id)
         self.atualizar_playlist_visual()
     
+    def abrir_youtube_downloader(self):
+        """Abre janela para buscar e baixar vídeos do YouTube"""
+        self.debug_log("📥 Abrindo YouTube Downloader...")
+        YouTubeDownloaderWindow(self.root, self.music_folder)
+        
     def abrir_modo_evento(self):
         if not MODO_EVENTO_DISPONIVEL:
             messagebox.showerror("Erro", "Módulos de evento não encontrados!")

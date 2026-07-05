@@ -709,7 +709,105 @@ class KaraokePlayer:
 
     def setup_ui(self):
         self.debug_log("Configurando interface...")
-        
+
+        # Menu horizontal superior (toolbar) - ocupa toda a largura da janela
+        toolbar_outer = tk.Frame(self.root, bg="#23233a", bd=2, relief=tk.RIDGE, highlightbackground="#2196F3", highlightcolor="#2196F3", highlightthickness=1)
+        toolbar_outer.pack(side=tk.TOP, fill=tk.X)
+
+        toolbar_frame = tk.Frame(toolbar_outer, bg="#23233a")
+        toolbar_frame.pack(fill=tk.X, padx=8, pady=6)
+
+        tb_btn_width = 16
+        tb_btn_height = 1
+        tb_btn_padx = 4
+        tb_btn_pady = 2
+
+        tk.Button(
+            toolbar_frame,
+            text="🔎 Buscar no Catálogo",
+            command=self.abrir_busca_catalogo,
+            bg="#2196F3",
+            fg="white",
+            font=("Arial", 9, "bold"),
+            cursor="hand2",
+            width=tb_btn_width,
+            height=tb_btn_height
+        ).pack(side=tk.LEFT, padx=tb_btn_padx, pady=tb_btn_pady)
+
+        tk.Button(
+            toolbar_frame,
+            text="📁 Tocar MP4 (Fura fila)",
+            command=self.load_file,
+            bg="#4CAF50",
+            fg="white",
+            font=("Arial", 9, "bold"),
+            cursor="hand2",
+            width=tb_btn_width,
+            height=tb_btn_height
+        ).pack(side=tk.LEFT, padx=tb_btn_padx, pady=tb_btn_pady)
+
+        tk.Button(
+            toolbar_frame,
+            text="📚 Importar Catálogo",
+            command=self.carregar_catalogo,
+            bg="#FF9800",
+            fg="white",
+            font=("Arial", 9, "bold"),
+            cursor="hand2",
+            width=tb_btn_width,
+            height=tb_btn_height
+        ).pack(side=tk.LEFT, padx=tb_btn_padx, pady=tb_btn_pady)
+
+        if MODO_EVENTO_DISPONIVEL:
+            tk.Button(
+                toolbar_frame,
+                text="🎉 MODO EVENTO",
+                command=self.abrir_modo_evento,
+                bg="#9C27B0",
+                fg="white",
+                font=("Arial", 9, "bold"),
+                cursor="hand2",
+                width=tb_btn_width,
+                height=tb_btn_height
+            ).pack(side=tk.LEFT, padx=tb_btn_padx, pady=tb_btn_pady)
+
+        tk.Button(
+            toolbar_frame,
+            text="❌ Finalizar Evento",
+            command=self.finalizar_evento_e_limpar_playlist,
+            bg="#f44336",
+            fg="white",
+            font=("Arial", 9, "bold"),
+            cursor="hand2",
+            width=tb_btn_width,
+            height=tb_btn_height
+        ).pack(side=tk.LEFT, padx=tb_btn_padx, pady=tb_btn_pady)
+
+        if MODO_EVENTO_DISPONIVEL:
+            tk.Button(
+                toolbar_frame,
+                text="📋 Gerenciar Eventos",
+                command=self.abrir_gerenciar_eventos,
+                bg="#607D8B",
+                fg="white",
+                font=("Arial", 9, "bold"),
+                cursor="hand2",
+                width=tb_btn_width,
+                height=tb_btn_height
+            ).pack(side=tk.LEFT, padx=tb_btn_padx, pady=tb_btn_pady)
+
+            tk.Button(
+                toolbar_frame,
+                text="📥 Baixar do YouTube",
+                command=self.abrir_youtube_downloader,
+                bg="#E91E63",
+                fg="white",
+                font=("Arial", 9, "bold"),
+                cursor="hand2",
+                width=tb_btn_width,
+                height=tb_btn_height
+            ).pack(side=tk.LEFT, padx=tb_btn_padx, pady=tb_btn_pady)
+
         # Container principal
         main_container = tk.Frame(self.root, bg="#1a1a1a")
         main_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -816,109 +914,6 @@ class KaraokePlayer:
         
 
 
-
-        # Frame agrupador estilizado para os botões principais
-        botoes_outer_frame = tk.Frame(left_frame, bg="#23233a", bd=3, relief=tk.RIDGE, highlightbackground="#2196F3", highlightcolor="#2196F3", highlightthickness=2)
-        botoes_outer_frame.pack(pady=12, fill=tk.X)
-
-        botoes_frame = tk.Frame(botoes_outer_frame, bg="#23233a")
-        botoes_frame.pack(padx=10, pady=10, fill=tk.X)
-
-        btn_width = 20
-        btn_height = 2
-        btn_padx = 8
-        btn_pady = 8
-
-        # Botões principais lado a lado, mesma altura
-        tk.Button(
-            botoes_frame,
-            text="🔎 Buscar no Catálogo",
-            command=self.abrir_busca_catalogo,
-            bg="#2196F3",
-            fg="white",
-            font=("Arial", 10, "bold"),
-            cursor="hand2",
-            width=btn_width,
-            height=btn_height
-        ).pack(side=tk.LEFT, padx=btn_padx, pady=btn_pady)
-
-        tk.Button(
-            botoes_frame,
-            text="📁 Tocar MP4 (Fura fila)",
-            command=self.load_file,
-            bg="#4CAF50",
-            fg="white",
-            font=("Arial", 10, "bold"),
-            cursor="hand2",
-            width=btn_width,
-            height=btn_height
-        ).pack(side=tk.LEFT, padx=btn_padx, pady=btn_pady)
-
-        tk.Button(
-            botoes_frame,
-            text="📚 Importar Catálogo",
-            command=self.carregar_catalogo,
-            bg="#FF9800",
-            fg="white",
-            font=("Arial", 10, "bold"),
-            cursor="hand2",
-            width=btn_width,
-            height=btn_height
-        ).pack(side=tk.LEFT, padx=btn_padx, pady=btn_pady)
-
-        if MODO_EVENTO_DISPONIVEL:
-            tk.Button(
-                botoes_frame,
-                text="🎉 MODO EVENTO",
-                command=self.abrir_modo_evento,
-                bg="#9C27B0",
-                fg="white",
-                font=("Arial", 10, "bold"),
-                cursor="hand2",
-                width=btn_width,
-                height=btn_height
-            ).pack(side=tk.LEFT, padx=btn_padx, pady=btn_pady)
-            
-        tk.Button(
-            botoes_frame,
-            text="❌ Finalizar Evento",
-            command=self.finalizar_evento_e_limpar_playlist,
-            bg="#f44336",
-            fg="white",
-            font=("Arial", 10, "bold"),
-            cursor="hand2",
-            width=btn_width,
-            height=btn_height
-        ).pack(side=tk.LEFT, padx=btn_padx, pady=btn_pady)
-
-        # Segunda linha de botões (gerenciar eventos)
-        if MODO_EVENTO_DISPONIVEL:
-            botoes_frame2 = tk.Frame(botoes_outer_frame, bg="#23233a")
-            botoes_frame2.pack(padx=10, pady=(0, 10), fill=tk.X)
-            
-            tk.Button(
-                botoes_frame2,
-                text="📋 Gerenciar Eventos",
-                command=self.abrir_gerenciar_eventos,
-                bg="#607D8B",
-                fg="white",
-                font=("Arial", 10, "bold"),
-                cursor="hand2",
-                width=btn_width,
-                height=btn_height
-            ).pack(side=tk.LEFT, padx=btn_padx, pady=btn_pady)
-
-            tk.Button(
-                botoes_frame2,
-                text="📥 Baixar do YouTube",
-                command=self.abrir_youtube_downloader,
-                bg="#E91E63",
-                fg="white",
-                font=("Arial", 10, "bold"),
-                cursor="hand2",
-                width=btn_width,
-                height=btn_height
-            ).pack(side=tk.LEFT, padx=btn_padx, pady=btn_pady)
 
         # Frame horizontal para pitch e controles de reprodução
         pitch_player_row = tk.Frame(left_frame, bg="#1a1a1a")

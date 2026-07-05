@@ -144,7 +144,7 @@ class KaraokePlayer:
     def __init__(self, root):
         self.root = root
         self.root.title("Karaoke Player - MP4")
-        self.root.geometry("1200x780")
+        self.root.geometry("1200x930")
         self.root.configure(bg="#1a1a1a")
         self.force_quit = False  # Adicione esta flag
         self.music_folder = r"D:/"
@@ -181,13 +181,18 @@ class KaraokePlayer:
         self.height = 0
         self.processing_pitch = False
         
-        # VLC instances
+        # VLC instances - dois players (mesma instância) para exibir
+        # simultaneamente no preview pequeno e na janela secundária
         self.vlc_instance = vlc.Instance('--no-xlib', '--no-video-title-show')
         self.player = self.vlc_instance.media_player_new()
-        
+        self.player_secundario = self.vlc_instance.media_player_new()
+        self.player.audio_set_mute(True)  # preview pequeno fica mudo
+        self.player_secundario.audio_set_mute(False)  # áudio sai pela janela secundária
+
         # Janela secundária para vídeo (segundo monitor)
         self.video_window = None
         self.video_frame_secondary = None
+        self.janela_secundaria_visivel = True
         
         # Modo Evento
         self.modo_evento_ativo = False
@@ -256,7 +261,23 @@ class KaraokePlayer:
         except Exception as e:
             self.debug_log(f"⚠️ Erro ao criar janela secundária: {e}")
             self.video_window = None
-    
+
+    def toggle_janela_secundaria(self):
+        """Mostra ou oculta a janela secundária de vídeo (útil para quem só tem 1 monitor)."""
+        if not self.video_window:
+            return
+
+        if self.janela_secundaria_visivel:
+            self.video_window.withdraw()
+            self.janela_secundaria_visivel = False
+            self.toggle_tela2_btn.config(text="🖥️ Mostrar Tela 2")
+            self.debug_log("🖥️ Janela secundária ocultada")
+        else:
+            self.video_window.deiconify()
+            self.janela_secundaria_visivel = True
+            self.toggle_tela2_btn.config(text="🖥️ Ocultar Tela 2")
+            self.debug_log("🖥️ Janela secundária exibida")
+
     def fechar_aplicacao(self, confirmar=True):
         """Fecha a aplicação com opção de confirmação e limpeza de recursos"""
         
@@ -301,6 +322,8 @@ class KaraokePlayer:
             try:
                 self.debug_log("⏹️ Parando player VLC...")
                 self.player.stop()
+                if hasattr(self, 'player_secundario') and self.player_secundario:
+                    self.player_secundario.stop()
                 self.debug_log("✅ Player VLC parado")
             except Exception as e:
                 self.debug_log(f"⚠️ Erro ao parar VLC: {e}")
@@ -335,6 +358,8 @@ class KaraokePlayer:
             try:
                 self.debug_log("⏹️ Parando player VLC...")
                 self.player.stop()
+                if hasattr(self, 'player_secundario') and self.player_secundario:
+                    self.player_secundario.stop()
                 self.debug_log("✅ Player VLC parado")
             except Exception as e:
                 self.debug_log(f"⚠️ Erro ao parar VLC: {e}")
@@ -707,32 +732,98 @@ class KaraokePlayer:
         
         return None
 
+    def criar_menu_bar(self):
+        """Cria a barra de menu nativa do Windows (Arquivos/Configurações/Evento)."""
+        menubar = tk.Menu(self.root)
+        self.root.config(menu=menubar)
+
+        arquivos_menu = tk.Menu(menubar, tearoff=0)
+        arquivos_menu.add_command(label="🔎 Busca no Catálogo", command=self.abrir_busca_catalogo)
+        arquivos_menu.add_command(label="📥 Baixar do YouTube", command=self.abrir_youtube_downloader)
+        menubar.add_cascade(label="Arquivos", menu=arquivos_menu)
+
+        config_menu = tk.Menu(menubar, tearoff=0)
+        config_menu.add_command(label="📚 Importar Catálogo", command=self.carregar_catalogo)
+        config_menu.add_command(label="📁 Pasta de Músicas", command=self.abrir_modal_pasta_musicas)
+        menubar.add_cascade(label="Configurações", menu=config_menu)
+
+        if MODO_EVENTO_DISPONIVEL:
+            evento_menu = tk.Menu(menubar, tearoff=0)
+            evento_menu.add_command(label="🎉 Modo Evento", command=self.abrir_modo_evento)
+            evento_menu.add_command(label="📋 Gerenciar Evento", command=self.abrir_gerenciar_eventos)
+            menubar.add_cascade(label="Evento", menu=evento_menu)
+
+    def abrir_modal_pasta_musicas(self):
+        """Abre um modal para selecionar a pasta de músicas."""
+        modal = tk.Toplevel(self.root)
+        modal.title("Pasta de Músicas")
+        modal.geometry("480x160")
+        modal.configure(bg="#222")
+        modal.transient(self.root)
+        modal.grab_set()
+        modal.resizable(False, False)
+
+        modal.update_idletasks()
+        x = (modal.winfo_screenwidth() // 2) - (480 // 2)
+        y = (modal.winfo_screenheight() // 2) - (160 // 2)
+        modal.geometry(f"480x160+{x}+{y}")
+
+        tk.Label(
+            modal,
+            text="📁 Pasta de Músicas",
+            bg="#222",
+            fg="#4CAF50",
+            font=("Arial", 14, "bold")
+        ).pack(pady=(15, 10))
+
+        tk.Entry(
+            modal,
+            textvariable=self.music_folder_var,
+            font=("Arial", 9),
+            width=45,
+            state="readonly",
+            readonlybackground="#222",
+            fg="#4CAF50"
+        ).pack(pady=5)
+
+        botoes_frame = tk.Frame(modal, bg="#222")
+        botoes_frame.pack(pady=(15, 10))
+
+        tk.Button(
+            botoes_frame,
+            text="Selecionar Pasta",
+            command=self.selecionar_pasta_musicas,
+            bg="#2196F3",
+            fg="white",
+            font=("Arial", 9, "bold"),
+            cursor="hand2",
+            padx=10,
+            pady=5
+        ).pack(side=tk.LEFT, padx=5)
+
+        tk.Button(
+            botoes_frame,
+            text="Fechar",
+            command=modal.destroy,
+            bg="#666",
+            fg="white",
+            font=("Arial", 9, "bold"),
+            cursor="hand2",
+            padx=10,
+            pady=5
+        ).pack(side=tk.LEFT, padx=5)
+
     def setup_ui(self):
         self.debug_log("Configurando interface...")
 
-        # Menu horizontal superior (toolbar) - ocupa toda a largura da janela
+        self.criar_menu_bar()
+
+        # Barra superior com o botão de finalizar evento (sempre visível)
         toolbar_outer = tk.Frame(self.root, bg="#23233a", bd=2, relief=tk.RIDGE, highlightbackground="#2196F3", highlightcolor="#2196F3", highlightthickness=1)
         toolbar_outer.pack(side=tk.TOP, fill=tk.X)
 
         toolbar_frame = tk.Frame(toolbar_outer, bg="#23233a")
         toolbar_frame.pack(fill=tk.X, padx=8, pady=6)
-
-        tb_btn_width = 16
-        tb_btn_height = 1
-        tb_btn_padx = 4
-        tb_btn_pady = 2
-
-        tk.Button(
-            toolbar_frame,
-            text="🔎 Buscar no Catálogo",
-            command=self.abrir_busca_catalogo,
-            bg="#2196F3",
-            fg="white",
-            font=("Arial", 9, "bold"),
-            cursor="hand2",
-            width=tb_btn_width,
-            height=tb_btn_height
-        ).pack(side=tk.LEFT, padx=tb_btn_padx, pady=tb_btn_pady)
 
         tk.Button(
             toolbar_frame,
@@ -742,34 +833,9 @@ class KaraokePlayer:
             fg="white",
             font=("Arial", 9, "bold"),
             cursor="hand2",
-            width=tb_btn_width,
-            height=tb_btn_height
-        ).pack(side=tk.LEFT, padx=tb_btn_padx, pady=tb_btn_pady)
-
-        tk.Button(
-            toolbar_frame,
-            text="📚 Importar Catálogo",
-            command=self.carregar_catalogo,
-            bg="#FF9800",
-            fg="white",
-            font=("Arial", 9, "bold"),
-            cursor="hand2",
-            width=tb_btn_width,
-            height=tb_btn_height
-        ).pack(side=tk.LEFT, padx=tb_btn_padx, pady=tb_btn_pady)
-
-        if MODO_EVENTO_DISPONIVEL:
-            tk.Button(
-                toolbar_frame,
-                text="🎉 MODO EVENTO",
-                command=self.abrir_modo_evento,
-                bg="#9C27B0",
-                fg="white",
-                font=("Arial", 9, "bold"),
-                cursor="hand2",
-                width=tb_btn_width,
-                height=tb_btn_height
-            ).pack(side=tk.LEFT, padx=tb_btn_padx, pady=tb_btn_pady)
+            width=20,
+            height=1
+        ).pack(side=tk.LEFT, padx=4, pady=2)
 
         tk.Button(
             toolbar_frame,
@@ -779,34 +845,22 @@ class KaraokePlayer:
             fg="white",
             font=("Arial", 9, "bold"),
             cursor="hand2",
-            width=tb_btn_width,
-            height=tb_btn_height
-        ).pack(side=tk.LEFT, padx=tb_btn_padx, pady=tb_btn_pady)
+            width=16,
+            height=1
+        ).pack(side=tk.LEFT, padx=4, pady=2)
 
-        if MODO_EVENTO_DISPONIVEL:
-            tk.Button(
-                toolbar_frame,
-                text="📋 Gerenciar Eventos",
-                command=self.abrir_gerenciar_eventos,
-                bg="#607D8B",
-                fg="white",
-                font=("Arial", 9, "bold"),
-                cursor="hand2",
-                width=tb_btn_width,
-                height=tb_btn_height
-            ).pack(side=tk.LEFT, padx=tb_btn_padx, pady=tb_btn_pady)
-
-            tk.Button(
-                toolbar_frame,
-                text="📥 Baixar do YouTube",
-                command=self.abrir_youtube_downloader,
-                bg="#E91E63",
-                fg="white",
-                font=("Arial", 9, "bold"),
-                cursor="hand2",
-                width=tb_btn_width,
-                height=tb_btn_height
-            ).pack(side=tk.LEFT, padx=tb_btn_padx, pady=tb_btn_pady)
+        self.toggle_tela2_btn = tk.Button(
+            toolbar_frame,
+            text="🖥️ Ocultar Tela 2",
+            command=self.toggle_janela_secundaria,
+            bg="#607D8B",
+            fg="white",
+            font=("Arial", 9, "bold"),
+            cursor="hand2",
+            width=16,
+            height=1
+        )
+        self.toggle_tela2_btn.pack(side=tk.LEFT, padx=4, pady=2)
 
         # Container principal
         main_container = tk.Frame(self.root, bg="#1a1a1a")
@@ -816,13 +870,13 @@ class KaraokePlayer:
         left_frame = tk.Frame(main_container, bg="#1a1a1a")
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        # Vídeo (menor)
-        video_frame = tk.Frame(left_frame, bg="#000000", width=380, height=170)
-        video_frame.pack(padx=5, pady=5)
-        video_frame.pack_propagate(False)
+        # Vídeo (preview)
+        self.video_frame_preview = tk.Frame(left_frame, bg="#000000", width=560, height=315)
+        self.video_frame_preview.pack(padx=5, pady=5)
+        self.video_frame_preview.pack_propagate(False)
 
         self.video_label = tk.Label(
-            video_frame, 
+            self.video_frame_preview,
             bg="#000000", 
             text="🎬 Carregue um vídeo MP4", 
             fg="#666666", 
@@ -852,37 +906,13 @@ class KaraokePlayer:
         )
         self.time_label.pack()
 
-        # Seletor de pasta de músicas e progresso na mesma linha
+        # Variável da pasta de músicas (exibida/alterada no modal do menu Configurações)
+        self.music_folder_var = tk.StringVar(value=self.music_folder)
+
+        # Progresso (importação de catálogo)
         pasta_progress_frame = tk.Frame(left_frame, bg="#1a1a1a")
         pasta_progress_frame.pack(fill=tk.X, padx=5, pady=(0, 8))
-        
-        # Lado esquerdo: Pasta de músicas
-        pasta_frame = tk.Frame(pasta_progress_frame, bg="#1a1a1a")
-        pasta_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        
-        tk.Label(
-            pasta_frame,
-            text="Pasta de músicas:",
-            bg="#1a1a1a",
-            fg="#BBB",
-            font=("Arial", 9, "italic")
-        ).pack(side=tk.LEFT)
-        self.music_folder_var = tk.StringVar(value=self.music_folder)
-        pasta_entry = tk.Entry(pasta_frame, textvariable=self.music_folder_var, font=("Arial", 9), width=30, state="readonly", readonlybackground="#222", fg="#4CAF50")
-        pasta_entry.pack(side=tk.LEFT, padx=6)
-        tk.Button(
-            pasta_frame,
-            text="Selecionar Pasta",
-            command=self.selecionar_pasta_musicas,
-            bg="#2196F3",
-            fg="white",
-            font=("Arial", 9, "bold"),
-            cursor="hand2",
-            padx=8,
-            pady=2
-        ).pack(side=tk.LEFT)
 
-        # Lado direito: Progresso (compacto)
         self.progress_frame = tk.Frame(pasta_progress_frame, bg="#232323", bd=1, relief=tk.SUNKEN, width=260)
         self.progress_frame.pack(side=tk.RIGHT, padx=(10, 0))
         self.progress_frame.pack_propagate(False)
@@ -1497,15 +1527,21 @@ class KaraokePlayer:
             # Callback para processar áudio
             def audio_callback(indata, frames, time_info, status):
                 if status:
-                    self.debug_log(f"⚠ Status do áudio: {status}")
+                    # Agenda o log na thread principal - evita I/O bloqueante
+                    # dentro da thread de tempo real do áudio (piora overflow)
+                    self.root.after(0, lambda s=str(status): self.debug_log(f"⚠ Status do áudio: {s}"))
                 if self.vu_running:
                     self._processar_audio_vu_callback(indata.copy())
-            
+
             # Abre stream de áudio com sounddevice
+            # latency='high' dá mais folga de buffer ao PortAudio, reduzindo
+            # a chance de "input overflow" quando o sistema está sob carga
+            # (ex.: os dois players de vídeo VLC tocando simultaneamente)
             self.audio_stream = sd.InputStream(
                 channels=CHANNELS,
                 samplerate=RATE,
                 blocksize=CHUNK,
+                latency='high',
                 callback=audio_callback,
                 dtype=np.int16
             )
@@ -2147,7 +2183,7 @@ class KaraokePlayer:
     def abrir_youtube_downloader(self):
         """Abre janela para buscar e baixar vídeos do YouTube"""
         self.debug_log("📥 Abrindo YouTube Downloader...")
-        YouTubeDownloaderWindow(self.root, self.music_folder)
+        YouTubeDownloaderWindow(self.root, self.music_folder, self)
         
     def abrir_modo_evento(self):
         if not MODO_EVENTO_DISPONIVEL:
@@ -2586,6 +2622,8 @@ class KaraokePlayer:
         if self.player and self.is_playing:
             try:
                 self.player.set_rate(speed)
+                if self.player_secundario:
+                    self.player_secundario.set_rate(speed)
                 self.debug_log(f"⚡ Velocidade alterada para: {speed}x")
             except Exception as e:
                 self.debug_log(f"⚠️ Erro ao alterar velocidade: {e}")
@@ -2658,37 +2696,54 @@ class KaraokePlayer:
                         self.iniciar_modo_evento(self.evento_id_atual, mus)
             return
         
-        # Reproduz com VLC
+        # Reproduz com VLC (dois players: preview pequeno + janela secundária)
         try:
-            # Preparar mídia
+            # Preparar mídia (mesma mídia nos dois players)
             media = self.vlc_instance.media_new(self.processed_file)
             self.player.set_media(media)
-            
-            # Embutir VLC na janela secundária se disponível
+            media_secundaria = self.vlc_instance.media_new(self.processed_file)
+            self.player_secundario.set_media(media_secundaria)
+
+            # Embutir player principal (mudo) no preview pequeno da janela principal
+            if self.video_frame_preview:
+                self.video_frame_preview.update_idletasks()
+                for widget in self.video_frame_preview.winfo_children():
+                    widget.destroy()
+
+                if os.name == 'nt':  # Windows
+                    hwnd = self.video_frame_preview.winfo_id()
+                    self.player.set_hwnd(hwnd)
+                else:  # Linux
+                    xid = self.video_frame_preview.winfo_id()
+                    self.player.set_xwindow(xid)
+
+            # Embutir player secundário (com áudio) na janela secundária, se disponível
             if self.video_window and self.video_frame_secondary:
                 # Garantir que o frame está visível e atualizado
                 self.video_window.update()
                 self.video_frame_secondary.update_idletasks()
-                
+
                 # Limpar qualquer label de texto anterior
                 for widget in self.video_frame_secondary.winfo_children():
                     widget.destroy()
-                
+
                 if os.name == 'nt':  # Windows
                     hwnd = self.video_frame_secondary.winfo_id()
-                    self.player.set_hwnd(hwnd)
+                    self.player_secundario.set_hwnd(hwnd)
                     self.debug_log(f"🎬 VLC embutido na janela secundária (HWND: {hwnd})")
                 else:  # Linux
                     xid = self.video_frame_secondary.winfo_id()
-                    self.player.set_xwindow(xid)
+                    self.player_secundario.set_xwindow(xid)
                     self.debug_log(f"🎬 VLC embutido na janela secundária (XID: {xid})")
-            
+
             self.player.play()
+            self.player_secundario.play()
             self.is_playing = True
-            
+
             # Aplicar velocidade de reprodução
             if hasattr(self, 'playback_speed'):
                 self.root.after(100, lambda: self.player.set_rate(self.playback_speed))
+                self.root.after(100, lambda: self.player_secundario.set_rate(self.playback_speed))
                 self.debug_log(f"⚡ Aplicando velocidade: {self.playback_speed}x")
             
             # Ativa V.U. meter automaticamente e reseta amostras
@@ -2714,17 +2769,27 @@ class KaraokePlayer:
         """Pausa reprodução do vídeo"""
         if self.player and self.is_playing:
             self.player.pause()
+            if self.player_secundario:
+                self.player_secundario.pause()
             self.is_playing = False
             self.status_label.config(text="⏸ Pausado")
             self.debug_log("⏸ Pause")
-    
+            # Microfone só precisa ficar ligado durante a execução do vídeo
+            if self.vu_running:
+                self.parar_vu_meter()
+
     def stop(self):
         """Para reprodução do vídeo"""
         if self.player:
             self.player.stop()
+            if self.player_secundario:
+                self.player_secundario.stop()
             self.is_playing = False
             self.status_label.config(text="⏹ Parado")
             self.debug_log("⏹ Stop")
+            # Microfone só precisa ficar ligado durante a execução do vídeo
+            if self.vu_running:
+                self.parar_vu_meter()
     
     def on_slider_press(self):
         """Chamado quando usuário clica no slider"""
@@ -2738,6 +2803,8 @@ class KaraokePlayer:
             progress = self.seek_slider.get() / 100.0
             new_time = int(progress * self.duration * 1000)  # VLC usa milissegundos
             self.player.set_time(new_time)
+            if self.player_secundario:
+                self.player_secundario.set_time(new_time)
             self.debug_log(f"⏩ Seek para: {new_time/1000:.1f}s")
     
     def on_slider_change(self, value):
@@ -2765,6 +2832,8 @@ class KaraokePlayer:
                 new_time = min(new_time, max_time)
             
             self.player.set_time(int(new_time))
+            if self.player_secundario:
+                self.player_secundario.set_time(int(new_time))
             self.debug_log(f"⏩ Seek: {seconds:+d}s (novo tempo: {new_time/1000:.1f}s)")
             
             # Atualizar slider horizontal

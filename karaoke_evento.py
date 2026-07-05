@@ -576,7 +576,19 @@ class ModoEventoWindow:
             padx=15,
             pady=8
         ).pack(side=tk.LEFT, padx=5)
-        
+
+        tk.Button(
+            linha1_frame,
+            text="🎬 Selecionar MP4",
+            command=self.adicionar_musica_mp4_direto,
+            bg="#2196F3",
+            fg="white",
+            font=("Arial", 11, "bold"),
+            cursor="hand2",
+            padx=15,
+            pady=8
+        ).pack(side=tk.LEFT, padx=5)
+
         tk.Button(
             linha1_frame,
             text="👥 Ver Participantes",
@@ -960,6 +972,156 @@ class ModoEventoWindow:
         # Focar no treeview
         dialog.after(100, lambda: tree.focus_set())
 
+    def adicionar_musica_mp4_direto(self):
+        """Seleciona um arquivo MP4 diretamente do disco e adiciona à playlist do evento"""
+        participantes = self.db.obter_participantes(self.evento_atual['id'])
+
+        if not participantes:
+            messagebox.showwarning(
+                "Aviso",
+                "Adicione participantes antes de criar a playlist!",
+                parent=self.window
+            )
+            self.mostrar_tela_participantes()
+            return
+
+        arquivo = filedialog.askopenfilename(
+            title="Selecione um arquivo MP4",
+            filetypes=[("Arquivos MP4", "*.mp4"), ("Todos os arquivos", "*.*")],
+            parent=self.window
+        )
+        if not arquivo:
+            return
+
+        dialog = tk.Toplevel(self.window)
+        dialog.title("Adicionar Música - Arquivo MP4")
+        dialog.geometry("500x280")
+        dialog.configure(bg="#1a1a1a")
+        dialog.transient(self.window)
+        dialog.grab_set()
+
+        tk.Label(
+            dialog,
+            text=f"📁 {os.path.basename(arquivo)}",
+            bg="#1a1a1a",
+            fg="#4CAF50",
+            font=("Arial", 10, "bold"),
+            wraplength=460,
+            justify=tk.LEFT
+        ).pack(padx=15, pady=(15, 10), anchor=tk.W)
+
+        tk.Label(
+            dialog,
+            text="Nome da Música:",
+            bg="#1a1a1a",
+            fg="white",
+            font=("Arial", 10)
+        ).pack(padx=15, anchor=tk.W)
+
+        nome_var = tk.StringVar(value=os.path.splitext(os.path.basename(arquivo))[0])
+        tk.Entry(
+            dialog,
+            textvariable=nome_var,
+            font=("Arial", 10),
+            width=45
+        ).pack(padx=15, pady=(0, 10), anchor=tk.W)
+
+        ctrl_frame = tk.Frame(dialog, bg="#1a1a1a")
+        ctrl_frame.pack(padx=15, pady=5, anchor=tk.W)
+
+        tk.Label(
+            ctrl_frame,
+            text="Participante:",
+            bg="#1a1a1a",
+            fg="white",
+            font=("Arial", 10)
+        ).pack(side=tk.LEFT, padx=(0, 5))
+
+        participante_var = tk.StringVar()
+        participante_combo = ttk.Combobox(
+            ctrl_frame,
+            textvariable=participante_var,
+            values=[p['nome'] for p in participantes],
+            state="readonly",
+            font=("Arial", 10),
+            width=20
+        )
+        participante_combo.pack(side=tk.LEFT, padx=(0, 20))
+        participante_combo.current(0)
+
+        tk.Label(
+            ctrl_frame,
+            text="Tom:",
+            bg="#1a1a1a",
+            fg="white",
+            font=("Arial", 10)
+        ).pack(side=tk.LEFT, padx=(0, 5))
+
+        tom_var = tk.IntVar(value=0)
+        tk.Spinbox(
+            ctrl_frame,
+            from_=-12,
+            to=12,
+            textvariable=tom_var,
+            width=4,
+            font=("Arial", 10)
+        ).pack(side=tk.LEFT)
+
+        def salvar():
+            nome_musica = nome_var.get().strip()
+            if not nome_musica:
+                messagebox.showerror("Erro", "Digite o nome da música!", parent=dialog)
+                return
+
+            nome_selecionado = participante_var.get()
+            participante_id = None
+            for p in participantes:
+                if p['nome'] == nome_selecionado:
+                    participante_id = p['id']
+                    break
+
+            if not participante_id:
+                messagebox.showerror("Erro", "Selecione um participante válido!", parent=dialog)
+                return
+
+            self.db.adicionar_musica_playlist(
+                evento_id=self.evento_atual['id'],
+                participante_id=participante_id,
+                arquivo_path=arquivo,
+                tom_ajuste=tom_var.get(),
+                musica_nome=nome_musica
+            )
+
+            self.atualizar_playlist()
+            dialog.destroy()
+            messagebox.showinfo("Sucesso", "Música adicionada à playlist!", parent=self.window)
+
+        btn_frame = tk.Frame(dialog, bg="#1a1a1a")
+        btn_frame.pack(pady=15)
+
+        tk.Button(
+            btn_frame,
+            text="✅ Adicionar à Playlist",
+            command=salvar,
+            bg="#4CAF50",
+            fg="white",
+            font=("Arial", 11, "bold"),
+            cursor="hand2",
+            padx=20,
+            pady=8
+        ).pack(side=tk.LEFT, padx=5)
+
+        tk.Button(
+            btn_frame,
+            text="❌ Cancelar",
+            command=dialog.destroy,
+            bg="#f44336",
+            fg="white",
+            font=("Arial", 10),
+            cursor="hand2",
+            padx=15,
+            pady=5
+        ).pack(side=tk.LEFT, padx=5)
 
     def iniciar_evento(self):
         """Inicia a reprodução sequencial do evento"""

@@ -10,9 +10,10 @@ from PIL import Image, ImageTk
 import vlc
 
 class YouTubeDownloaderWindow:
-    def __init__(self, parent, music_folder):
+    def __init__(self, parent, music_folder, main_app=None):
         self.parent = parent
         self.music_folder = music_folder
+        self.main_app = main_app
         self.videos_encontrados = []
         self.download_em_progresso = False
         self.busca_em_progresso = False
@@ -248,7 +249,7 @@ class YouTubeDownloaderWindow:
         
         # Frame do vídeo
         self.preview_frame = tk.Frame(right_frame, bg="#000000", width=310, height=164)
-        self.preview_frame.pack(padx=10, pady=5)
+        self.preview_frame.pack(padx=11, pady=6)
         self.preview_frame.pack_propagate(False)
         
         self.preview_label = tk.Label(
@@ -295,9 +296,24 @@ class YouTubeDownloaderWindow:
         )
         self.info_duracao.pack(anchor=tk.W, pady=2)
                 
-        # Botão de preview
+        # Botões de baixar e preview lado a lado
+        botoes_preview_frame = tk.Frame(right_frame, bg="#2d2d2d")
+        botoes_preview_frame.pack(pady=(10, 5))
+
+        tk.Button(
+            botoes_preview_frame,
+            text="⬇️ Baixar Selecionado",
+            command=self.baixar_video_selecionado,
+            bg="#4CAF50",
+            fg="white",
+            font=("Arial", 10, "bold"),
+            cursor="hand2",
+            padx=15,
+            pady=10
+        ).pack(side=tk.LEFT, padx=(0, 5))
+
         self.preview_btn = tk.Button(
-            right_frame,
+            botoes_preview_frame,
             text="▶️ Preview (10s)",
             command=self.tocar_preview,
             bg="#4CAF50",
@@ -308,7 +324,21 @@ class YouTubeDownloaderWindow:
             padx=20,
             pady=10
         )
-        self.preview_btn.pack(pady=(10, 5))
+        self.preview_btn.pack(side=tk.LEFT, padx=(5, 0))
+
+        self.adicionar_lista_btn = tk.Button(
+            botoes_preview_frame,
+            text="➕ Adicionar à Lista",
+            command=self.adicionar_a_lista,
+            bg="#2196F3",
+            fg="white",
+            font=("Arial", 10, "bold"),
+            cursor="hand2",
+            state=tk.DISABLED,
+            padx=15,
+            pady=10
+        )
+        self.adicionar_lista_btn.pack(side=tk.LEFT, padx=(5, 0))
 
         # Botão de stop (inicialmente escondido/desabilitado)
         self.stop_btn = tk.Button(
@@ -348,19 +378,7 @@ class YouTubeDownloaderWindow:
         # BOTÕES INFERIORES
         bottom_frame = tk.Frame(self.window, bg="#1a1a1a", pady=15)
         bottom_frame.pack(fill=tk.X, padx=20)
-        
-        tk.Button(
-            bottom_frame,
-            text="⬇️ Baixar Selecionado",
-            command=self.baixar_video_selecionado,
-            bg="#4CAF50",
-            fg="white",
-            font=("Arial", 11, "bold"),
-            cursor="hand2",
-            padx=20,
-            pady=12
-        ).pack(side=tk.LEFT, padx=5)
-        
+
         tk.Label(
             bottom_frame,
             text=f"📂 Pasta destino: {self.music_folder}",
@@ -516,11 +534,13 @@ class YouTubeDownloaderWindow:
         
         video = self.videos_encontrados[index]
         self.selected_video_index = index
-        
+
         # Atualiza informações
         self.info_titulo.config(text=f"🎵 {video['titulo']}")
         self.info_canal.config(text=f"📺 Canal: {video['canal']}")
         self.info_duracao.config(text=f"⏱️ Duração: {video['duracao_str']}")
+
+        self.adicionar_lista_btn.config(state=tk.NORMAL)
 
         arquivo_local = video.get('arquivo_local')
         if arquivo_local and os.path.exists(arquivo_local):
@@ -706,7 +726,38 @@ class YouTubeDownloaderWindow:
         video = self.videos_encontrados[index]
         
         self.baixar_video(video['url'], video['titulo'], video_item=video)
-    
+
+    def adicionar_a_lista(self):
+        """Adiciona o vídeo selecionado como item da playlist de execução no main.py"""
+        selection = self.tree.selection()
+        if not selection:
+            return
+
+        index = self.tree.index(selection[0])
+        video = self.videos_encontrados[index]
+
+        if not self.main_app:
+            messagebox.showerror("Erro", "Não foi possível adicionar: painel principal indisponível.")
+            return
+
+        arquivo_local = video.get('arquivo_local')
+        if not arquivo_local or not os.path.exists(arquivo_local):
+            if messagebox.askyesno(
+                "Vídeo não baixado",
+                "É necessário baixar o vídeo antes de adicioná-lo à lista. Deseja baixar agora?"
+            ):
+                self.baixar_video(video['url'], video['titulo'], video_item=video, auto_adicionar=True)
+            return
+
+        cantor = video.get('canal') or "YouTube"
+        musica = video.get('titulo')
+        self.main_app.debug_log(f"📥 Adicionando à lista de execução: {musica} ({cantor})")
+
+        if self.main_app.modo_evento_ativo:
+            self.main_app.adicionar_musica_evento(arquivo_local, cantor, musica, "YT")
+        else:
+            self.main_app.adicionar_musica_playlist_simples(arquivo_local, cantor, musica, "YT")
+
     def baixar_url_direta(self):
         """Baixa vídeo de uma URL direta"""
         url = self.url_var.get().strip()
@@ -720,7 +771,7 @@ class YouTubeDownloaderWindow:
         
         self.baixar_video(url)
         
-    def baixar_video(self, url, titulo=None, video_item=None, auto_preview=False):
+    def baixar_video(self, url, titulo=None, video_item=None, auto_preview=False, auto_adicionar=False):
         """Baixa um vídeo do YouTube"""
         if self.download_em_progresso:
             messagebox.showwarning("Aguarde", "Já há um download em progresso!")
@@ -793,6 +844,9 @@ class YouTubeDownloaderWindow:
                         if auto_preview and video_item in self.videos_encontrados:
                             # Garante que o preview será iniciado assim que o download terminar
                             self.tocar_preview()
+                        if auto_adicionar and video_item in self.videos_encontrados:
+                            # Adiciona à lista de execução assim que o download terminar
+                            self.adicionar_a_lista()
 
                 self.window.after(0, lambda: messagebox.showinfo(
                     "Sucesso",
